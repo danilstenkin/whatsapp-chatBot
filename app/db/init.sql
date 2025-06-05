@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     phone VARCHAR(20) NOT NULL,
     message TEXT NOT NULL,
-    sender_role VARCHAR(10) NOT NULL CHECK (sender_role IN ('client', 'bot')),
+    sender_role VARCHAR(10) NOT NULL CHECK (sender_role IN ('user', 'assistant')),
     received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (phone) REFERENCES clients(phone) ON DELETE CASCADE
 );
