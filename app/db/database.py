@@ -28,7 +28,7 @@ async def save_message(phone: str, message: str, role: str):
     await db.execute(query=insert_message_query, values={"phone": phone, "message": message, "sender_role": role})
 
 # Получение последних сообщений
-async def get_last_messages(phone: str, limit: int = 10):
+async def get_last_messages(phone: str, limit: int = 100):
     query = """
         SELECT sender_role, message FROM messages
         WHERE phone = :phone
