@@ -23,7 +23,7 @@ async def send_whatsapp_response(to_number: str, message: str):
         print("✅ Сообщение отправлено:", sid)
 
         # ✅ Сохраняем сообщение от бота в базу данных
-        await save_message(to_number, message, "bot")
+        await save_message(to_number, message, "assistant")
 
     else:
         print("❌ Ошибка Twilio:", response.status_code, response.text)
