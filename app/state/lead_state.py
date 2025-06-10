@@ -1,9 +1,4 @@
-# app/dialog/lead_state_manager.py
-
 from app.db.redis_client import redis_client
-
-
-
 
 async def set_lead_state(phone: str):
     """Установить состояние клиента (с TTL)."""
