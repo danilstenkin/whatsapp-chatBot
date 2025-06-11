@@ -1,8 +1,8 @@
 import httpx
-from app.config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
-from app.db.database import save_message  # ⬅️ добавили импорт
+from app.config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
 
-TWILIO_WHATSAPP_NUMBER = 'whatsapp:+14155238886'
+
+TWILIO_WHATSAPP_NUMBER = TWILIO_WHATSAPP_NUMBER
 
 async def send_whatsapp_response(to_number: str, message: str):
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
@@ -21,9 +21,6 @@ async def send_whatsapp_response(to_number: str, message: str):
     if response.status_code == 201:
         sid = response.json()["sid"]
         print("✅ Сообщение отправлено:", sid)
-
-        # ✅ Сохраняем сообщение от бота в базу данных
-        await save_message(to_number, message, "assistant")
 
     else:
         print("❌ Ошибка Twilio:", response.status_code, response.text)
