@@ -1,10 +1,24 @@
 -- Таблица клиентов
 CREATE TABLE IF NOT EXISTS clients (
     id SERIAL PRIMARY KEY,
-    phone VARCHAR(20) UNIQUE NOT NULL,
-    first_name VARCHAR(50),
-    last_name VARCHAR(50),
-    problem_description TEXT
+    full_name TEXT NOT NULL DEFAULT '',                           -- Ф.И.О.
+    phone VARCHAR(20) NOT NULL UNIQUE,                            -- Номер телефона
+    iin VARCHAR(12) NOT NULL DEFAULT '',                          -- ИИН
+    city TEXT NOT NULL DEFAULT '',                                -- Город
+    credit_types TEXT[] NOT NULL DEFAULT '{}',                    -- Виды кредитов (массив)
+    total_debt NUMERIC(12, 2) NOT NULL DEFAULT 0.00,              -- Общая сумма задолженности
+    monthly_payment NUMERIC(12, 2) NOT NULL DEFAULT 0.00,         -- Ежемесячный платёж
+    has_overdue BOOLEAN NOT NULL DEFAULT FALSE,                  -- Есть ли просрочка
+    overdue_days INTEGER NOT NULL DEFAULT 0,                     -- Кол-во дней просрочки
+    has_official_income BOOLEAN NOT NULL DEFAULT FALSE,          -- Официальный доход
+    has_business BOOLEAN NOT NULL DEFAULT FALSE,                 -- ИП или ТОО
+    has_property BOOLEAN NOT NULL DEFAULT FALSE,                 -- Есть ли имущество
+    property_types TEXT[] NOT NULL DEFAULT '{}',                 -- Типы имущества (массив)
+    has_spouse BOOLEAN NOT NULL DEFAULT FALSE,                   -- Есть супруг/супруга
+    has_children BOOLEAN NOT NULL DEFAULT FALSE,                 -- Есть дети
+    social_status TEXT[] NOT NULL DEFAULT '{}',                  -- Социальное положение (массив)
+    problem_description TEXT NOT NULL DEFAULT '',                -- Описание проблемы
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP               -- Время создания записи
 );
 
 -- Таблица сообщений
@@ -18,4 +32,5 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 ALTER DATABASE whatsapp SET TIME ZONE 'Asia/Almaty';
+
 

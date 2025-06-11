@@ -13,19 +13,22 @@ async def disconnect_db():
 async def save_message(phone: str, message: str, role: str):
     # 1. Сохраняем клиента, если его ещё нет
     insert_client_query = """
-    INSERT INTO clients (phone, first_name, last_name)
-    VALUES (:phone, '', '')
+    INSERT INTO clients (phone)
+    VALUES (:phone)
     ON CONFLICT (phone) DO NOTHING;
     """
+    await db.execute(query=insert_client_query, values={"phone": phone})
 
     # 2. Сохраняем сообщение
     insert_message_query = """
     INSERT INTO messages (phone, message, sender_role)
     VALUES (:phone, :message, :sender_role);
     """
-
-    await db.execute(query=insert_client_query, values={"phone": phone})
-    await db.execute(query=insert_message_query, values={"phone": phone, "message": message, "sender_role": role})
+    await db.execute(query=insert_message_query, values={
+        "phone": phone,
+        "message": message,
+        "sender_role": role  # 'user' или 'assistant'
+    })
 
 # Получение последних сообщений
 async def get_last_messages(phone: str, limit: int = 100):

@@ -18,7 +18,7 @@ async def get_lead_state(phone: str) -> str | None:
     return data  # Просто строка, без json.loads
 
 async def save_lead_state(phone: str):
-    await redis_client.set(phone, "NEW", ex=REDIS_TTL)
+    await redis_client.set(phone, "gpt_problem_empathy", ex=REDIS_TTL)
 
 async def clear_lead_state(phone: str):
     await redis_client.delete(phone)
