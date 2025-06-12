@@ -23,4 +23,4 @@ async def send_whatsapp_response(to_number: str, message: str):
         print("✅ Сообщение отправлено:", sid)
 
     else:
-        print("❌ Ошибка Twilio:", response.status_code, response.text)
+        print(data)

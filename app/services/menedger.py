@@ -2,13 +2,25 @@ from app.db.database import save_message
 from app.services.messenger import send_whatsapp_response
 from app.services.gpt import generate_reply
 from app.db.redis_client import set_lead_state, save_lead_state, get_lead_state
-from app.validators.user_data import is_valid_full_name, is_valid_iin
-from app.db.utils import update_full_name_by_phone, update_city_by_phone, update_iin_by_phone, update_credit_types_by_phone
+from app.validators.user_data import is_valid_full_name, is_valid_iin, extract_float_from_text
+from app.db.utils import (
+    update_full_name_by_phone,
+    update_city_by_phone,
+    update_iin_by_phone,
+    update_credit_types_by_phone,
+    update_total_debt_by_phone,
+    update_monthly_payment_by_phone,
+    update_overdue_days_by_phone,
+    update_has_overdue_by_phone,
+    update_has_official_income_by_phone,
+    update_has_business_by_phone
+)
+from app.services.security import encrypt,decrypt
 from app.validators.credit_types import parse_credit_selection
 
 
 async def dialog_menedger (from_number: str, message_text:str):
-
+    
     state = await get_lead_state(from_number)
     if state is None:
             
@@ -102,21 +114,28 @@ async def dialog_menedger (from_number: str, message_text:str):
                   print("Заглушка№1")
            elif message_text == "да":
                   print("Отлично! Сейчас пройдём небольшую анкету, чтобы записать вас на консультацию.")
+                  await send_whatsapp_response(from_number,"Отлично! Сейчас пройдём небольшую анкету, чтобы записать вас на консультацию." )
                   await set_lead_state(from_number, "awaiting_full_name")
+                  await send_whatsapp_response(from_number, "*Пожалуйста, напишите вашу фамилию, имя и отчество полностью.*\n_Пример: Иванов Иван Иванович_")
                   print("*Пожалуйста, напишите вашу фамилию, имя и отчество полностью.*\n_Пример: Иванов Иван Иванович_")
            else:
                   print("Только Да или Нет")
-                  
+                  await send_whatsapp_response(from_number, "Только Да или Нет")
 
     elif state == "awaiting_full_name":
            if is_valid_full_name(message_text):
+                  message_text = encrypt(message_text)
                   await update_full_name_by_phone(from_number, message_text)        
                   print ("Отлично ваше ФИО записанно ✅")
+                  await send_whatsapp_response(from_number ,"Отлично ваше ФИО записанно ✅")
                   await set_lead_state(from_number, "awaiting_city")
                   print("📍 Пожалуйста, укажите, в каком городе вы находитесь.\nПример: Алматы")
+                  await send_whatsapp_response(from_number, "📍 Пожалуйста, укажите, в каком городе вы находитесь.\nПример: Алматы" )
                   
            else:
                   print("к сожалению не удалось записать ваше имя, попробуйте еще раз!")
+                  await send_whatsapp_response(from_number, "к сожалению не удалось записать ваше имя, попробуйте еще раз!")
+
 
 
     elif state == "awaiting_city":
@@ -132,7 +151,9 @@ async def dialog_menedger (from_number: str, message_text:str):
 
     elif state == "awaiting_iin":
            if is_valid_iin(message_text):
+                  message_text = encrypt(message_text)
                   await update_iin_by_phone(from_number, message_text)
+                  await send_whatsapp_response(from_number,"Cпасибо иин приняли!")
                   print("Cпасибо иин приняли!")
                   await send_whatsapp_response(from_number,
 "📋 Выберите, какие кредиты у вас имеются (можно выбрать несколько через запятую):\n\n"
@@ -169,22 +190,104 @@ async def dialog_menedger (from_number: str, message_text:str):
         if selected:
                 await update_credit_types_by_phone(from_number, selected)
                 await set_lead_state(from_number, "awaiting_debt_amount")
-                await send_whatsapp_response(from_number, "✅ Спасибо. Укажите, пожалуйста, общую сумму задолженности в тенге.")    
+                await send_whatsapp_response(from_number, "✅ Спасибо. Укажите, пожалуйста, общую сумму задолженности в тенге (можно примерно). \n Если не знаете отпрвьте '-'")    
         else:
 
                 await send_whatsapp_response(from_number, "❗️Пожалуйста, выберите номера из списка, например: *1, 3, 5*")
                 print("❗️Пожалуйста, выберите номера из списка, например: *1, 3, 5*")
 
+    elif state == "awaiting_debt_amount":
+           if message_text == "-":
+                  await send_whatsapp_response(from_number,
+    "✅ Спасибо. Следующий вопрос:\n\n*Какой у вас ежемесячный платёж по кредитам?*\n\nПожалуйста, укажите сумму числом.\nПример: *120000 тг*"
+)
+                  await set_lead_state(from_number, "awaiting_monthly_payment")
+           else:  
+              totalDebt = extract_float_from_text(message_text)
+              if totalDebt != None:            
+                     await update_total_debt_by_phone (from_number, totalDebt)
+                     await set_lead_state(from_number, "awaiting_monthly_payment")
+                     await send_whatsapp_response(from_number, "✅ Спасибо. Следующий вопрос:\n\n*Какой у вас ежемесячный платёж по кредитам?*\n\nПожалуйста, укажите сумму числом.\nПример: *120000 тг*")
+                     
+              else:
+                     await send_whatsapp_response(from_number,
+    "❗️К сожалению, не удалось распознать сумму. Пожалуйста, укажите её числом.\n\nПример: *1000000 тг*"
+)
+
+
+   
+                  
+    elif state == "awaiting_monthly_payment":
+            if message_text == "-":
+                     await send_whatsapp_response(from_number, "Есть ли у вас просрочка (Да или Нет)?")
+                     await set_lead_state(from_number, "waiting_has_overdue")
+            else:  
+                     totalDebt = extract_float_from_text(message_text)
+                     if totalDebt != None:            
+                            await update_monthly_payment_by_phone (from_number, totalDebt)
+                            await set_lead_state(from_number, "waiting_has_overdue")
+                            await send_whatsapp_response(from_number, "Есть ли у вас просрочка (Да или Нет)?")
+
+                            
+                     else:
+                            await send_whatsapp_response(from_number,
+       "❗️К сожалению, не удалось распознать сумму. Пожалуйста, укажите её числом.\n\nПример: *1000000 тг*"
+       )
+
+    elif state == "waiting_has_overdue":
+           msg = message_text.strip().lower()
+           if msg in ["да", "есть", "да есть", "да, есть"]:
+                  await update_has_overdue_by_phone(from_number, True)
+                  print("Приняли ваши данные, Сколько дней просрочка ?")
+                  await set_lead_state(from_number,"awaiting_overdue_days")
+           elif msg in ["нет", "не было", "отсутствует"]:
+                  await set_lead_state(from_number, "awaiting_has_official_income")
+                  await send_whatsapp_response(from_number, "Приняли ваши данные, есть ли у вас официальный доход ?")
+
+           else:
+                  await send_whatsapp_response(from_number, "❗️Пожалуйста, ответьте *Да* или *Нет*. Есть ли у вас просрочка?")      
+                     
+
+
+    elif state == "awaiting_overdue_days":
+           await update_overdue_days_by_phone(from_number, message_text)
+           await set_lead_state(from_number, "awaiting_has_official_income")
+           await send_whatsapp_response(from_number, "Приняли ваши данные, есть ли у вас официальный доход ?")
+
+    elif state == "awaiting_has_official_income":
+           msg = message_text.strip().lower()
+           if msg in ["да", "есть", "да есть", "да, есть"]:
+                  await update_has_official_income_by_phone(from_number, True)
+                  await set_lead_state(from_number, "waiting_has_business")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас ТОО или ИП")
+
+           elif msg in ["нет", "не было", "отсутствует"]:
+                  await set_lead_state(from_number, "waiting_has_business")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас ТОО или ИП")
+           else:
+                  await send_whatsapp_response(from_number, "Напишите только Да или Нет")
+
+    elif state ==  "waiting_has_business":
+           msg = message_text.strip().lower()
+           if msg in ["да", "есть", "да есть", "да, есть"]:
+                  await update_has_business_by_phone(from_number, True)
+                  await set_lead_state(from_number, "waiting_property_types")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество")
+
+           elif msg in ["нет", "не было", "отсутствует"]:
+                  await set_lead_state(from_number, "waiting_has_spouse")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество")
+           else:
+                  await send_whatsapp_response(from_number, "Напишите только Да или Нет")
+           
+                  
+
+                  
+           
+
+
 
 
            
-              
-                 
-                  
-                  
-    
 
-  
-           
-        
-    
+
