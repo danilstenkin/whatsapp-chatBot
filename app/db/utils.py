@@ -129,6 +129,24 @@ async def update_social_status_by_phone(phone: str, social_status: list[str]) ->
     RETURNING id
     """
     return await db.fetch_one(query, {"social_status": social_status, "phone": phone})
+
+async def update_has_children_by_phone(phone: str, has_children: bool) -> bool:
+    query = """
+        UPDATE clients
+        SET has_children = :has_children
+        WHERE phone = :phone
+        RETURNING id
+    """
+    return await db.fetch_one(query, {"has_children": has_children, "phone": phone}) is not None
+
+async def update_problem_description_by_phone(phone: str, problem_description: str) -> bool:
+    query = """
+        UPDATE clients
+        SET problem_description = :problem_description
+        WHERE phone = :phone
+        RETURNING id
+    """
+    return await db.fetch_one(query, {"problem_description": problem_description, "phone": phone}) is not None
     
 
    

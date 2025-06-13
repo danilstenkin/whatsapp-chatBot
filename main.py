@@ -9,6 +9,10 @@ load_dotenv()  # обязательно до всех других импорт�
 app = FastAPI()
 app.include_router(whatsapp.router)
 
+@app.get("/")
+async def root():
+    return {"message": "Бот работает!"}
+
 logger = logging.getLogger("uvicorn.error")
 
 @app.on_event("startup")
