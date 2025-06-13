@@ -13,31 +13,32 @@ from app.db.utils import (
     update_overdue_days_by_phone,
     update_has_overdue_by_phone,
     update_has_official_income_by_phone,
-    update_has_business_by_phone
+    update_has_business_by_phone,
+    update_has_property_by_phone,
+    update_property_types_by_phone,
+    update_has_spouse_by_phone,
+    update_social_status_by_phone
 )
-from app.services.security import encrypt,decrypt
+from app.services.security import encrypt
 from app.validators.credit_types import parse_credit_selection
 
 
-async def dialog_menedger (from_number: str, message_text:str):
-    
+async def dialog_menedger(from_number: str, message_text: str):
     state = await get_lead_state(from_number)
+
     if state is None:
-            
-            base =  ("""
-Здравствуйте! 👋  
-Вы написали в юридическую компанию **YCG – Защита прав заёмщиков** ⚖️
-
-Мы помогаем решить финансовые вопросы:  
-📌 Восстановление платёжеспособности  
-📌 Банкротство физических лиц  
-📌 Переговоры с банками и МФО
-
-Расскажите, пожалуйста, с какой проблемой вы столкнулись? Мы постараемся вам помочь 🤝
-    """)    
-            print(base)
-            await save_lead_state(phone=from_number)
-            await send_whatsapp_response(from_number, base)
+        welcome_text = (
+            "Здравствуйте! 👋\n"
+            "Вы написали в юридическую компанию **YCG – Защита прав заёмщиков** ⚖️\n\n"
+            "Мы помогаем решить финансовые вопросы:\n"
+            "📌 Восстановление платёжеспособности\n"
+            "📌 Банкротство физических лиц\n"
+            "📌 Переговоры с банками и МФО\n\n"
+            "Расскажите, пожалуйста, с какой проблемой вы столкнулись? Мы постараемся вам помочь 🤝"
+        )
+        await save_lead_state(phone=from_number)
+        await send_whatsapp_response(from_number, welcome_text)
+        return
             
 
 
@@ -239,6 +240,7 @@ async def dialog_menedger (from_number: str, message_text:str):
            if msg in ["да", "есть", "да есть", "да, есть"]:
                   await update_has_overdue_by_phone(from_number, True)
                   print("Приняли ваши данные, Сколько дней просрочка ?")
+                  send_whatsapp_response(from_number, "Приняли ваши данные, Сколько дней просрочка ?" )
                   await set_lead_state(from_number,"awaiting_overdue_days")
            elif msg in ["нет", "не было", "отсутствует"]:
                   await set_lead_state(from_number, "awaiting_has_official_income")
@@ -258,8 +260,9 @@ async def dialog_menedger (from_number: str, message_text:str):
            msg = message_text.strip().lower()
            if msg in ["да", "есть", "да есть", "да, есть"]:
                   await update_has_official_income_by_phone(from_number, True)
-                  await set_lead_state(from_number, "waiting_has_business")
                   await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас ТОО или ИП")
+                  await set_lead_state(from_number, "waiting_has_business")
+                 
 
            elif msg in ["нет", "не было", "отсутствует"]:
                   await set_lead_state(from_number, "waiting_has_business")
@@ -271,14 +274,101 @@ async def dialog_menedger (from_number: str, message_text:str):
            msg = message_text.strip().lower()
            if msg in ["да", "есть", "да есть", "да, есть"]:
                   await update_has_business_by_phone(from_number, True)
-                  await set_lead_state(from_number, "waiting_property_types")
-                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество")
+                  await set_lead_state(from_number, "waiting_has_property")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество ?")
 
            elif msg in ["нет", "не было", "отсутствует"]:
-                  await set_lead_state(from_number, "waiting_has_spouse")
-                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество")
+                  await set_lead_state(from_number, "awaiting_has_property")
+                  await send_whatsapp_response(from_number, "Приняли ваш ответ,Есть ли у вас имущество ?")
            else:
                   await send_whatsapp_response(from_number, "Напишите только Да или Нет")
+           
+    elif state == "awaiting_has_property":
+           msg = message_text.strip().lower()
+           if msg in ["да", "есть", "да есть", "да, есть"]:
+                  await update_has_property_by_phone(from_number, True)
+                  await send_whatsapp_response(from_number,
+"🏠 Укажите, какое имущество у вас имеется (можно выбрать несколько через запятую):\n\n"
+"1. Дом\n"
+"2. Квартира\n"
+"3. Гараж\n"
+"4. Доля\n"
+"5. Автомобиль\n"
+"6. Акции\n"
+"7. Другое\n"
+"8. Нет имущества\n\n"
+"Пример ответа: *1, 3, 5*"
+)
+                  await set_lead_state(from_number, "awaiting_property_types")
+
+
+           elif msg in ["нет", "не было", "отсутствует"]:
+                  await set_lead_state(from_number, "awaiting_has_spouse")
+                  await send_whatsapp_response(from_number, "Есть ли у вас супруг/супруга ?")
+           else:
+                  await send_whatsapp_response(from_number, "Напишите только Да или Нет")
+                  
+    elif state == "awaiting_property_types":
+       selected = parse_credit_selection(message_text)
+       if selected:
+              await update_property_types_by_phone(from_number, selected)
+              await send_whatsapp_response(from_number, "✅ Спасибо. Укажите, пожалуйста, есть ли у вас супруг/супруга? (Да/Нет)")
+              await set_lead_state(from_number, "waiting_has_spouse")
+       else:
+              await send_whatsapp_response(from_number, "❗️Пожалуйста, выберите номера из списка, например: *1, 3, 5*")
+
+    elif state == "awaiting_has_spouse":
+           msg = message_text.strip().lower()
+           if msg in ["да", "есть", "да есть", "да, есть"]:
+                  await update_has_spouse_by_phone(from_number, True)
+                  await set_lead_state(from_number, "awaiting_social_status")
+                  await send_whatsapp_response(from_number, 
+            "❗️Пожалуйста, выберите номера из списка.\n\n"
+            "1. Являюсь лицом с инвалидностью\n"
+            "2. Являюсь получателем АСП\n"
+            "3. Многодетная семья\n"
+            "4. Получаю иные пособия и льготы\n"
+            "5. Не отношусь к уязвимым слоям населения\n\n"
+            "Пример: *2, 3, 5*")
+                  
+           elif msg in ["нет", "не было", "отсутствует"]:
+                  await set_lead_state(from_number, "awaiting_social_status")
+                  await send_whatsapp_response(from_number, 
+            "❗️Пожалуйста, выберите номера из списка.\n\n"
+            "1. Являюсь лицом с инвалидностью\n"
+            "2. Являюсь получателем АСП\n"
+            "3. Многодетная семья\n"
+            "4. Получаю иные пособия и льготы\n"
+            "5. Не отношусь к уязвимым слоям населения\n\n"
+            "Пример: *2, 3, 5*")
+                  
+           else:
+                  await send_whatsapp_response(from_number, "❗️Пожалуйста, выберите номера из списка, например: *1, 3, 5*")
+
+
+    elif state == "awaiting_social_status":
+              selected = parse_credit_selection(message_text)
+              if selected:
+                     await update_social_status_by_phone(from_number, selected)
+                     await send_whatsapp_response(from_number, "✅ Спасибо, ваши данные записаны.")
+                     # можешь задать следующий вопрос или завершить анкету
+              else:
+                     await send_whatsapp_response(from_number, 
+                     "❗️Пожалуйста, выберите номера из списка.\n\n"
+                     "1. Являюсь лицом с инвалидностью\n"
+                     "2. Являюсь получателем АСП\n"
+                     "3. Многодетная семья\n"
+                     "4. Получаю иные пособия и льготы\n"
+                     "5. Не отношусь к уязвимым слоям населения\n\n"
+                     "Пример: *2, 3, 5*")
+
+                  
+                  
+           
+
+           
+                  
+                  
            
                   
 

@@ -90,3 +90,46 @@ async def update_has_business_by_phone(phone: str, has_business: bool) -> bool:
         RETURNING id
     """
     return await db.fetch_one(query, {"has_business": has_business, "phone": phone}) is not None
+
+
+async def update_has_property_by_phone(phone: str, has_property: bool) -> bool:
+    query = """
+        UPDATE clients
+        SET has_property = :has_property
+        WHERE phone = :phone
+        RETURNING id
+    """
+    return await db.fetch_one(query, {"has_property": has_property, "phone": phone}) is not None
+
+
+async def update_property_types_by_phone(phone: str, property_types: list[str]) -> bool:
+    query = """
+    UPDATE clients 
+    SET property_types = :property_types
+    WHERE phone = :phone
+    RETURNING id
+    """
+    return await db.fetch_one(query, {"property_types": property_types, "phone": phone})
+
+async def update_has_spouse_by_phone(phone: str, has_spouse: bool) -> bool:
+    query = """
+        UPDATE clients
+        SET has_spouse = :has_spouse
+        WHERE phone = :phone
+        RETURNING id
+    """
+    return await db.fetch_one(query, {"has_spouse": has_spouse, "phone": phone}) is not None
+
+
+async def update_social_status_by_phone(phone: str, social_status: list[str]) -> bool:
+    query = """
+    UPDATE clients 
+    SET social_status = :social_status
+    WHERE phone = :phone
+    RETURNING id
+    """
+    return await db.fetch_one(query, {"social_status": social_status, "phone": phone})
+    
+
+   
+
