@@ -1,6 +1,6 @@
 from app.db.database import save_message
 from app.services.messenger import send_whatsapp_response
-from app.services.gpt import generate_reply
+from app.services.deepSeek import generate_reply
 from app.db.redis_client import set_lead_state, save_lead_state, get_lead_state
 from app.validators.user_data import is_valid_full_name, is_valid_iin, extract_float_from_text
 from app.db.utils import (
@@ -19,10 +19,13 @@ from app.db.utils import (
     update_has_spouse_by_phone,
     update_social_status_by_phone,
     update_has_children_by_phone, 
-    update_problem_description_by_phone
+    update_problem_description_by_phone,
+    get_full_client_data
 )
 from app.services.security import encrypt
-from app.validators.credit_types import parse_credit_selection
+from app.validators.credit_types import parse_credit_selection, parse_social_status_selection, parse_buisness_selection
+
+from app.services.create_task_in_bitrix import send_lead_to_bitrix
 
 
 async def dialog_menedger(from_number: str, message_text: str):
@@ -51,8 +54,7 @@ async def dialog_menedger(from_number: str, message_text: str):
 Ты — доброжелательный юридический консультант компании YCG. Клиент только что поделился своей финансовой проблемой.
 
 Твоя задача — проявить сочувствие, показать, что он выажен, и мягко уточнить, какой нибудь уточняющий вопрос который будет полезен для юриста. Пиши по-человечески, не как робот., будь краток»
-
-
+попроси чтобы ответили одним сообщением
 """)            
             await save_message(from_number, message_text, role="user")
             gpt_reply = await generate_reply(from_number, message_text, base)
@@ -67,8 +69,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                     РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ
 Ты — юридический консультант YCG. Клиент рассказал о своей проблеме, теперь нужно уточнить детали: которые будут полезны юристом опирайся уже на диалог клиент это user, а ты assistant.
 не говори что ему делать задай просто какой нибудь вопрос по делу просто вопрос  
-
-
+попроси чтобы ответили одним сообщением
 """)            
             await save_message(from_number, message_text, role="user")
             gpt_reply = await generate_reply(from_number, message_text, base)
@@ -81,9 +82,7 @@ async def dialog_menedger(from_number: str, message_text: str):
     elif state == "gpt_offer_consultation":
            base = (
 """РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ, вежливо и профессионально.
-
 Вы — опытный юрист-консультант компании YCG. Клиент описал свою проблему с долгами (смотрите предыдущий диалог). Ваша задача — проанализировать ситуацию и донести, что в его случае крайне важно получить профессиональную помощь.
-
 Сформулируйте, что без индивидуального подхода и анализа документов невозможно оценить риски и выбрать законный путь. Обязательно подчеркните:
 
 — Ситуация требует внимательного подхода  
@@ -332,14 +331,14 @@ async def dialog_menedger(from_number: str, message_text: str):
               "🔹 *Есть ли у вас супруг(а)?*\n"
               "Ответьте Да/Нет"
               )
-              await set_lead_state(from_number, "awaiting_has_spouse")
+              await set_lead_state(from_number, " awaiting_has_spouse")
        else:
               await send_whatsapp_response(from_number, 
               "❗ Пожалуйста, ответьте Да или Нет"
               )
 
     elif state == "awaiting_property_types":
-       selected = parse_credit_selection(message_text)
+       selected = parse_buisness_selection(message_text)
        if selected:
               await update_property_types_by_phone(from_number, selected)
               await send_whatsapp_response(from_number, 
@@ -404,24 +403,49 @@ async def dialog_menedger(from_number: str, message_text: str):
               )
 
     elif state == "awaiting_social_status":
-       selected = parse_credit_selection(message_text)
-       if selected:
+       try:
+              selected = parse_social_status_selection(message_text)
+              if not selected:
+                     await send_whatsapp_response(
+                            from_number,
+                            "❗ Пожалуйста, выберите из списка\nПример: *1, 2, 3*"
+                     )
+                     return
+
+              # 1. Обновляем социальный статус
               await update_social_status_by_phone(from_number, selected)
-              base = ("""
-Тебе идет переписка между менеджером и клиентом в юридическую компанию, твоя задача сделать итог по переписке то есть дать описание его ситуации, чтобы юристы прочитали и поняли в чем суть проблемы ТВОЯ ЗАДАЧА написать суть проблемы для юристов чтобы они прочитали и поняли в чем ситуация. 
-""")
-              problem = await generate_reply(from_number,"", base)
-
+              
+              # 2. Генерируем описание проблемы
+              base = """Твоя задача - создать краткое описание проблемы клиента для юристов  это сообщение пойдет в Bitrix24 и мы юристы из Казахстана, не ставь нигде ** и * если что надо сделать жирным ьексьом используй такую конструкцию [b]Дети:[/b]"""
+              problem = await generate_reply(from_number, "", base)
               await update_problem_description_by_phone(from_number, problem)
-
-              await send_whatsapp_response(from_number, 
+              
+              # 3. Логируем в консоль (для отладки)
+              print("✅ Анкета заполнена для номера:", from_number)
+              
+              # 4. Отправляем сообщение клиенту
+              await send_whatsapp_response(
+              from_number,
               "✅ Анкета успешно заполнена!\n"
               "Наш специалист свяжется с вами в ближайшее время.\n\n"
               "Спасибо за предоставленную информацию!"
               )
-              # Здесь можно добавить логику завершения анкеты
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, выберите из списка\n"
-              "Пример: *1, 2, 3*"
-              ) 
+              
+              # 5. Получаем данные и отправляем в Bitrix24
+              client_data = await get_full_client_data(from_number)
+              if not client_data:
+                     await send_whatsapp_response(from_number, "❌ Ошибка при обработке ваших данных")
+                     return
+              
+              bitrix_result = await send_lead_to_bitrix(client_data)
+              
+              # Дополнительная проверка результата
+              if not bitrix_result or 'error' in bitrix_result:
+                     print("⚠️ Ошибка при отправке в Bitrix24:", bitrix_result.get('error', 'Unknown error'))
+              
+       except Exception as e:
+              print(f"❌ Критическая ошибка в обработчике: {str(e)}")
+              await send_whatsapp_response(
+              from_number,
+              "⚠️ Произошла техническая ошибка. Пожалуйста, попробуйте позже."
+              )

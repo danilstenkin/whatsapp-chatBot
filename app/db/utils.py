@@ -1,4 +1,22 @@
 from app.db.database import db
+from app.services.create_task_in_bitrix import send_lead_to_bitrix
+from typing import Optional, Dict, Any
+import logging
+from app.services.security import decrypt
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # или DEBUG
+
+# Консольный вывод
+handler = logging.StreamHandler()
+formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+from app.config import DATABASE_URL
+import asyncpg
+
+
 
 async def update_full_name_by_phone(phone: str, full_name: str):
     query = """
@@ -150,4 +168,71 @@ async def update_problem_description_by_phone(phone: str, problem_description: s
     
 
    
-
+async def get_full_client_data(phone: str) -> Optional[Dict[str, Any]]:
+    """
+    Получает полные данные клиента из базы данных для отправки в Bitrix24
+    
+    Args:
+        phone: Номер телефона в формате '+7XXXXXXXXXX'
+    
+    Returns:
+        Словарь с данными клиента, готовыми для отправки в Bitrix24
+        None если клиент не найден или произошла ошибка
+    """
+    conn = None
+    try:
+        # Подключаемся к базе данных
+        conn = await asyncpg.connect(DATABASE_URL)
+        
+        # Получаем данные клиента
+        record = await conn.fetchrow(
+            """
+            SELECT 
+                id, full_name, phone, iin, city, 
+                credit_types, total_debt, monthly_payment,
+                has_overdue, overdue_days, has_official_income,
+                has_business, has_property, property_types,
+                has_spouse, has_children, social_status,
+                problem_description, created_at
+            FROM clients 
+            WHERE phone = $1
+            """, 
+            phone
+        )
+        
+        if not record:
+            logger.warning(f"Клиент с телефоном {phone} не найден в базе")
+            return None
+        
+        # Преобразуем Record в словарь с обработкой специальных типов
+        client_data = {
+            "id": record["id"],
+            "full_name": decrypt(record["full_name"]),
+            "phone": record["phone"],
+            "iin": decrypt(record["iin"]),
+            "city": record["city"],
+            "credit_types": list(record["credit_types"]) if record["credit_types"] else [],
+            "total_debt": float(record["total_debt"]),
+            "monthly_payment": float(record["monthly_payment"]),
+            "has_overdue": record["has_overdue"],
+            "overdue_days": record["overdue_days"],
+            "has_official_income": record["has_official_income"],
+            "has_business": record["has_business"],
+            "has_property": record["has_property"],
+            "property_types": list(record["property_types"]) if record["property_types"] else [],
+            "has_spouse": record["has_spouse"],
+            "has_children": record["has_children"],
+            "social_status": list(record["social_status"]) if record["social_status"] else [],
+            "problem_description": record["problem_description"],
+            "created_at": record["created_at"].isoformat() if record["created_at"] else None
+        }
+        
+        logger.info(f"Данные клиента {phone} успешно получены из БД")
+        return client_data
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении данных клиента {phone}: {str(e)}")
+        return None
+    finally:
+        if conn:
+            await conn.close()
