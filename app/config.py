@@ -22,9 +22,6 @@ TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+import os
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-
-
-#security
-
-
