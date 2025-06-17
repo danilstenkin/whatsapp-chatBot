@@ -1,1 +1,2 @@
 .env
+chatbot_logs_*.log
