@@ -1,5 +1,6 @@
 import httpx
 from app.config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
+from app.logger_config import logger
 
 async def send_whatsapp_response(to_number: str, message: str):
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
@@ -11,22 +12,16 @@ async def send_whatsapp_response(to_number: str, message: str):
     }
 
     auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    print("Сообщение: ",message )
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, data=data, auth=auth)
-            response.raise_for_status()  # Вызовет исключение для 4xx/5xx статусов
-            
             if response.status_code == 201:
                 sid = response.json().get("sid")
-                print(f"✅ Сообщение успешно отправлено! SID: {sid}")
+                logger.info(f"[TWILIO][{to_number}] - ✅ Сообщение успешно отправлено! SID: {sid}")
                 return True
             else:
                 error_data = response.json()
-                print(f"❌ Ошибка отправки (код {response.status_code}):")
-                print(f"Twilio Error: {error_data.get('message')}")
-                print(f"Код ошибки: {error_data.get('code')}")
-                print(f"Доп. информация: {error_data.get('more_info')}")
+                logger.error(f"[TWILIO][{to_number}] - ❌ Ошибка отправки (код {response.status_code}): {error_data}")
                 return False
 
     except httpx.HTTPStatusError as e:

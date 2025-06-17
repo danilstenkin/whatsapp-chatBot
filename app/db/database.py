@@ -1,5 +1,6 @@
 from databases import Database
 from app.config import DATABASE_URL
+from app.logger_config import logger
 
 # Переименовали переменную, чтобы избежать конфликта
 db = Database(DATABASE_URL)
@@ -11,24 +12,31 @@ async def disconnect_db():
     await db.disconnect()
 
 async def save_message(phone: str, message: str, role: str):
-    # 1. Сохраняем клиента, если его ещё нет
+    # 1. Пытаемся вставить клиента с возвратом id
     insert_client_query = """
     INSERT INTO clients (phone)
     VALUES (:phone)
-    ON CONFLICT (phone) DO NOTHING;
+    ON CONFLICT (phone) DO NOTHING
+    RETURNING id;
     """
-    await db.execute(query=insert_client_query, values={"phone": phone})
+    result = await db.fetch_one(query=insert_client_query, values={"phone": phone})
+    
+    if result:
+        logger.info(f"[BD-clients][{phone}] сообщение успешно сохранено")
 
     # 2. Сохраняем сообщение
     insert_message_query = """
     INSERT INTO messages (phone, message, sender_role)
-    VALUES (:phone, :message, :sender_role);
+    VALUES (:phone, :message, :sender_role)
+    RETURNING id;
     """
-    await db.execute(query=insert_message_query, values={
+    result_mes = await db.fetch_one(query=insert_message_query, values={
         "phone": phone,
         "message": message,
         "sender_role": role  # 'user' или 'assistant'
     })
+    if result_mes:
+        logger.info(f"[BD-messages][{phone}] сообщение успешно сохранено")
 
 # Получение последних сообщений
 async def get_last_messages(phone: str, limit: int = 100):

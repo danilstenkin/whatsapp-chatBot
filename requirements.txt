@@ -51,3 +51,4 @@ typing-inspection==0.4.1
 urllib3==2.4.0
 uvicorn==0.34.3
 yarl==1.20.0
+colorlog==6.8.2

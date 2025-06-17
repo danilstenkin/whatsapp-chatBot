@@ -26,6 +26,8 @@ from app.services.security import encrypt
 from app.validators.credit_types import parse_credit_selection, parse_social_status_selection, parse_buisness_selection
 
 from app.services.create_task_in_bitrix import send_lead_to_bitrix
+from datetime import datetime
+from app.logger_config import logger
 
 
 async def dialog_menedger(from_number: str, message_text: str):
@@ -48,65 +50,165 @@ async def dialog_menedger(from_number: str, message_text: str):
 
             
     elif state == "gpt_problem_empathy":
+       try:
+              logger.info(f"Начало обработки состояния gpt_problem_empathy для {from_number}")
+              
+              base_prompt = """
+              РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ
+              Ты — доброжелательный юридический консультант Казахстанской компании YCG. Клиент только что поделился своей финансовой проблемой.
+              
+              Твоя задача — проявить сочувствие, показать, что он важен, и мягко уточнить какой-нибудь вопрос, который будет полезен для юриста. 
+              Пиши по-человечески, не как робот, будь краток.
+              Попроси чтобы ответили одним сообщением
+              """
+              logger.debug(f"[{from_number}][{state}] - Сформирован промт для GPT: {base_prompt.strip()[:100]}...")
 
-            base = ("""
-                    РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ
-Ты — доброжелательный юридический консультант компании YCG. Клиент только что поделился своей финансовой проблемой.
+              await save_message(from_number, message_text, role="user")
 
-Твоя задача — проявить сочувствие, показать, что он выажен, и мягко уточнить, какой нибудь уточняющий вопрос который будет полезен для юриста. Пиши по-человечески, не как робот., будь краток»
-попроси чтобы ответили одним сообщением
-""")            
-            await save_message(from_number, message_text, role="user")
-            gpt_reply = await generate_reply(from_number, message_text, base)
-            await send_whatsapp_response(from_number, gpt_reply)
-            await save_message(from_number, gpt_reply, role="assistant")
-            await set_lead_state (from_number, "gpt_problem_dig_deeper")
-            print(gpt_reply)
+              logger.info(f"[{from_number}][{state}] - Инициирован запрос к GPT для генерации ответа {from_number}")
+
+              reply = await generate_reply(from_number, message_text, base_prompt)
+
+              await send_whatsapp_response(from_number, reply)
+              await save_message(from_number, reply, role="assistant")
+
+              if await set_lead_state(from_number, "gpt_problem_dig_deeper"):
+                    logger.info(f"[{from_number}][{state}] - Состояние изменено на gpt_problem_dig_deeper для {from_number}")
+
+       except Exception as e:
+              logger.error(f"[{from_number}][{state}] - Ошибка в состоянии gpt_problem_empathy для {from_number}: {str(e)}", exc_info=True)
+              
+              error_message = "Извините, возникла техническая ошибка. Пожалуйста, попробуйте написать позже."
+              await send_whatsapp_response(from_number, error_message)
+              logger.error(f"[{from_number}][{state}] - Пользователю {from_number} отправлено сообщение об ошибке")
+
 
     elif state == "gpt_problem_dig_deeper":
+       try:
+              logger.info(f"[DEEP DIVE] Начало обработки для {from_number}")
+              logger.debug(f"Входящее сообщение: {message_text[:200]}...")
 
-            base = ("""
-                    РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ
-Ты — юридический консультант YCG. Клиент рассказал о своей проблеме, теперь нужно уточнить детали: которые будут полезны юристом опирайся уже на диалог клиент это user, а ты assistant.
-не говори что ему делать задай просто какой нибудь вопрос по делу просто вопрос  
-попроси чтобы ответили одним сообщением
-""")            
-            await save_message(from_number, message_text, role="user")
-            gpt_reply = await generate_reply(from_number, message_text, base)
-            await send_whatsapp_response(from_number, gpt_reply)
-            await save_message(from_number, gpt_reply, role="assistant")
-            await set_lead_state (from_number, "gpt_offer_consultation")
-            print(gpt_reply)
+              base_prompt = """
+              РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ
+              Ты — Казахстанский юридический консультант YCG. Клиент рассказал о своей проблеме, теперь нужно уточнить детали, которые будут полезны юристу.
+              Опирайся на диалог (клиент - user, ты - assistant).
+              Не говори что делать, задай конкретный уточняющий вопрос по делу.
+              Попроси ответить одним сообщением.
+              """
+              await save_message(from_number, message_text, role="user")
+              logger.info(f"[{from_number}][{state}] - Сообщение пользователя {from_number} сохранено в истории")
+
+              start_time = datetime.now()
+              gpt_reply = await generate_reply(from_number, message_text, base_prompt)
+              exec_time = (datetime.now() - start_time).total_seconds()
+              
+              logger.info(f"[{from_number}][{state}] - GPT ответ сгенерирован за {exec_time:.2f} сек")
+              logger.debug(f"[{from_number}][{state}] - Ответ GPT ({len(gpt_reply)} chars): {gpt_reply[:200]}...")
+
+              if not gpt_reply or len(gpt_reply.strip()) < 10:
+                     logger.error(f"[{from_number}][{state}] - GPT вернул пустой или слишком короткий ответ")
+                     raise ValueError("Невалидный ответ от GPT")
+
+              await send_whatsapp_response(from_number, gpt_reply)
+              await save_message(from_number, gpt_reply, role="assistant")
+              logger.info(f"[{from_number}][{state}] - Ответ успешно отправлен и сохранен")
+
+              await set_lead_state(from_number, "gpt_offer_consultation")
+              logger.info(f"[{from_number}][{state}] - Переход в состояние gpt_offer_consultation")
+
+              if "?" not in gpt_reply:
+                     logger.warning("GPT не задал вопрос в ответе")
+
+       except Exception as e:
+              logger.error(f"[{from_number}][{state}] - Ошибка в gpt_problem_dig_deeper: {str(e)}", exc_info=True)
+              
+              fallback_msg = "Благодарю за информацию. Чтобы предложить решение, мне нужно уточнить один момент. Расскажите, как давно у вас эта проблема?"
+              await send_whatsapp_response(from_number, fallback_msg)
+              await set_lead_state(from_number, "gpt_offer_consultation")
+              
+              logger.info(f"[{from_number}] - Отправлен fallback-ответ и осуществлен переход")
 
 
-    elif state == "gpt_offer_consultation":
-           base = (
-"""РАЗГОВАРИВАЙ ВСЕГДА НА ВЫ, вежливо и профессионально.
-Вы — опытный юрист-консультант компании YCG. Клиент описал свою проблему с долгами (смотрите предыдущий диалог). Ваша задача — проанализировать ситуацию и донести, что в его случае крайне важно получить профессиональную помощь.
-Сформулируйте, что без индивидуального подхода и анализа документов невозможно оценить риски и выбрать законный путь. Обязательно подчеркните:
+    elif state == "gpt_offer_consultation":   
+          try:
+                logger.info(f"[CONSULTATION OFFER] - Начало обработки для {from_number}")
+                logger.debug(f"[{from_number}][{state}] - Входящее сообщение: {message_text[:200]}...")
 
-— Ситуация требует внимательного подхода  
-— Важно не откладывать решение  
-— **Необходимо записаться на бесплатную консультацию в YCG**, чтобы разобраться в возможных вариантах
+                base = """
+              Ты — ведущий Казахстанский юрист-консультант YCG. Сформулируй ответ клиенту по следующим правилам:
 
-Никаких вопросов в конце, никаких фраз «хотите записаться?» — просто твёрдое, уважительное утверждение: консультация **необходима**, она бесплатна и поможет разобраться в ситуации.
+              1. Формат ответа:
+              Исходя из описанной ситуации с {кратко_суть_проблемы}, мы наблюдаем {основные_риски}.
+              Не задавай ни одного вопроса Будь краток и твоя главная задача убедить человека что ему надо к нам придти
+              Когда хочешь сделать текст жирным делай вот так ->  *привет*
 
-Пример тона:
-«Исходя из описанного, ваша ситуация требует внимательной юридической оценки. Важно не откладывать — с каждым днём последствия могут усиливаться.
+              2. Требования к стилю:
+              ▸ Строго на "Вы"
+              ▸ Уважительно, но твердо
+              ▸ Без вопросов в конце
+              ▸ Без фраз "хотите записаться?"
+              ▸ Акцент на срочность и бесплатность
 
-Для того чтобы определить оптимальные законные шаги, вам обязательно нужно пройти бесплатную консультацию с юристом нашей компании YCG. Только так можно точно понять, какие действия сейчас возможны в вашем случае.»
-"""
-)
+              3. Пример ответа:
+              «Анализируя вашу ситуацию с долгами в 3 банках, мы видим риски:
+              - Возможность ареста имущества в течение месяца
+              - Рост задолженности на 15-20% ежеквартально
 
-           
-           await save_message(from_number, message_text, role="user")
-           gpt_reply = await generate_reply(from_number, message_text, base)
-           await save_message(from_number, gpt_reply, role="assistant")
-           await send_whatsapp_response(from_number, gpt_reply)
-           print(gpt_reply)
-           await send_whatsapp_response(from_number, "✅ Готовы ли Вы записаться на бесплатную консультацию?\nПожалуйста, напишите: Да или Нет")
-           print("✅ Готовы ли Вы записаться на бесплатную консультацию?\nПожалуйста, напишите: Да или Нет")
-           await set_lead_state (from_number, "questionnaire")
+              Только после изучения договоров и судебной практики по вашему региону мы сможем:
+              - Определить законные основания для отсрочки
+              - Предложить варианты реструктуризации
+              - Защитить ваши права как заемщика
+
+              Запишитесь на бесплатную консультацию в YCG — это единственный способ получить точный прогноз и план действий.»
+
+              5. Запрещено:
+              × Давать конкретные юридические советы
+              × Использовать шаблонные фразы
+              × Упоминать конкурентов
+              """
+       
+                await save_message(from_number, message_text, role="user")
+                logger.debug(f"[{from_number}][{state}] - сообщение пользователя сохранено в историю")
+
+                start_time = datetime.now()
+                reply = await generate_reply(from_number, message_text, base)
+                exec_time = (datetime.now() - start_time).total_seconds()
+                logger.info(f"[{from_number}][{state}] - GPT ответ сгенирован за {exec_time:.2f} сек")
+
+                if not generate_reply or len(reply.strip()) < 20:
+                      logger.error(f"[{from_number}][{state}] - GPT вернул неполноценный ответ")
+                      raise ValueError("Недостаточный ответ от GPT")
+
+                await send_whatsapp_response(from_number, reply)
+                logger.info(f"[{from_number}][{state}] - отправлен ответ от GPT")
+                await save_message(from_number, reply, role="assistant")
+                logger.info(f"[{from_number}][{state}] - GPT ответ сохранен в БД")
+
+                confirmation_msg = "✅ Готовы ли Вы записаться на бесплатную консультацию?\nПожалуйста, напишите: Да или Нет"
+                try:
+                     sent = await send_whatsapp_response(from_number, confirmation_msg)
+                     if not sent:
+                            logger.error(f"[{from_number}][{state}] - Не удалось отправить подтверждение")
+
+                except Exception as e:
+                     logger.error(f"[{from_number}][{state}] - Ошибка отправки: {str(e)}")
+
+                await set_lead_state(from_number, "questionnaire")
+                logger.info(f"[{from_number}][{state}] - переход на состояние -> 'questionnaire'")
+
+          except Exception as e:
+                logger.error(f"[{from_number}][{state}] - Критическая ошибка в gpt_offer_consultation: {str(e)}", exc_info=True)
+
+
+                fallback_msg = (
+              "Благодарю за информацию. Для точной оценки вашего случая "
+              "необходима консультация юриста YCG. Это бесплатно и ни к чему не обязывает. "
+              "Готовы ли вы продолжить? (Да/Нет)"
+                )
+
+                await send_whatsapp_response(from_number, fallback_msg)
+                await set_lead_state(from_number, "questionnaire")
+                logger.info(f"[{from_number}][{state}] - Отправлен fallback-вариант для {from_number}")
 
 
     elif state == "questionnaire":
@@ -414,6 +516,14 @@ async def dialog_menedger(from_number: str, message_text: str):
 
               # 1. Обновляем социальный статус
               await update_social_status_by_phone(from_number, selected)
+
+              # 4. Отправляем сообщение клиенту
+              await send_whatsapp_response(
+              from_number,
+              "✅ Анкета успешно заполнена!\n"
+              "Наш специалист свяжется с вами в ближайшее время.\n\n"
+              "Спасибо за предоставленную информацию!"
+              )
               
               # 2. Генерируем описание проблемы
               base = """Твоя задача - создать краткое описание проблемы клиента для юристов  это сообщение пойдет в Bitrix24 и мы юристы из Казахстана, не ставь нигде ** и * если что надо сделать жирным ьексьом используй такую конструкцию [b]Дети:[/b]"""
@@ -423,13 +533,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               # 3. Логируем в консоль (для отладки)
               print("✅ Анкета заполнена для номера:", from_number)
               
-              # 4. Отправляем сообщение клиенту
-              await send_whatsapp_response(
-              from_number,
-              "✅ Анкета успешно заполнена!\n"
-              "Наш специалист свяжется с вами в ближайшее время.\n\n"
-              "Спасибо за предоставленную информацию!"
-              )
+              
               
               # 5. Получаем данные и отправляем в Bitrix24
               client_data = await get_full_client_data(from_number)
