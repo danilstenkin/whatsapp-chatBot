@@ -64,7 +64,6 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.debug(f"[{from_number}][{state}] - Сформирован промт для GPT: {base_prompt.strip()[:100]}...")
 
               await save_message(from_number, message_text, role="user")
-
               logger.info(f"[{from_number}][{state}] - Инициирован запрос к GPT для генерации ответа {from_number}")
 
               reply = await generate_reply(from_number, message_text, base_prompt)
@@ -212,58 +211,137 @@ async def dialog_menedger(from_number: str, message_text: str):
 
 
     elif state == "questionnaire":
-       message_text = message_text.strip().lower()
-       if message_text == "нет":
-              await send_whatsapp_response(from_number, "Хорошо, если передумаете - мы всегда готовы помочь!")
-       elif message_text == "да":
-              await send_whatsapp_response(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.")
-              await set_lead_state(from_number, "awaiting_full_name")
-              await send_whatsapp_response(from_number, 
-              "🔹 *Укажите ваше полное ФИО*\n"
-              "Формат: Фамилия Имя Отчество\n"
-              "Пример: *Иванов Иван Иванович*"
-              )
-       else:
-              await send_whatsapp_response(from_number, "Пожалуйста, ответьте 'Да' или 'Нет'")
+       
+       try:
+             logger.info(f"[{from_number} - начало обработки состояния questionnaire")
+
+             message_text = message_text.strip().lower()
+
+             if message_text == "нет":
+                   await send_whatsapp_response(from_number,"Хорошо, если передумаете - мы всегда готовы помочь!")
+                   logger.info(f"[{from_number}] - отказался от анкеты")
+
+             elif message_text == "да":
+                   await send_whatsapp_response(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.")
+                   await set_lead_state(from_number, "awaiting_full_name")
+                   await send_whatsapp_response(from_number, "🔹 *Укажите ваше полное ФИО*\n"
+                                                               "Формат: Фамилия Имя Отчество\n"
+                                                               "Пример: *Иванов Иван Иванович*")
+             
+             else:
+                   await send_whatsapp_response(from_number, "Пожалуйста, ответьте '*Да*' или '*Нет*'")
+                   logger.warning(f"[{from_number}] Получен некорректный ответ в состоянии questionnaire: {message_text}")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в состоянии questionnaire: {str(e)}", exc_info=True)
+              await send_whatsapp_response(from_number, "Извините, произошла техническая ошибка. Пожалуйста, попробуйте еще раз.")
+
+
+
 
     elif state == "awaiting_full_name":
-       if is_valid_full_name(message_text):
-              message_text = encrypt(message_text)
-              await update_full_name_by_phone(from_number, message_text)
-              await send_whatsapp_response(from_number, "✅ ФИО успешно сохранено")
-              await set_lead_state(from_number, "awaiting_city")
-              await send_whatsapp_response(from_number, 
-              "🔹 *Укажите ваш город проживания*\n"
-              "Пример: *Алматы*"
-              )
-       else:
-              await send_whatsapp_response(from_number, 
-              "Неверный формат ФИО. Пожалуйста, укажите:\n"
-              "▸ Фамилию\n▸ Имя\n▸ Отчество (при наличии)\n"
-              "Пример: *Иванов Иван Иванович*"
-              )
+       try:
+             cleaned_name = message_text.strip()
+
+             if not is_valid_full_name(cleaned_name):
+                   await send_whatsapp_response(from_number,"⚠️ Неверный формат ФИО. Требуется:\n"
+                                                               "• Фамилия\n• Имя\n• Отчество (если есть)\n\n"
+                                                               "Пример: *Иванов Иван Иванович*\n"
+                                                               "Пожалуйста, введите заново:" )
+                   return
+             
+             encrypted_name = encrypt(cleaned_name)
+             await update_full_name_by_phone(from_number, encrypted_name)
+
+             await send_whatsapp_response(from_number, "✅ ФИО сохранено!")
+             await set_lead_state(from_number, "awaiting_city")
+              
+             await send_whatsapp_response(
+              from_number,
+              "📍 *В каком городе вы проживаете?*\n"
+              "Пример: *Нур-Султан* или *Алматы*"
+        )
+
+             
+       except Exception as e:
+        logger.error(f"FullName processing error for {from_number}: {str(e)}")
+        await send_whatsapp_response(
+            from_number,
+            "🔴 Произошла техническая ошибка. Пожалуйста, "
+            "попробуйте отправить ФИО еще раз."
+        )
+
+
 
     elif state == "awaiting_city":
-       city = message_text.strip().title()
-       if len(city) >= 2:
+       try:
+              class CityValidationError(Exception):
+                     """Кастомное исключение для ошибок валидации города"""
+                     pass
+
+              city = message_text.strip().title()
+              if len(city) < 2:
+                     logger.error(f"[{from_number}][{state}] - Слишком короткое название города")
+                     raise CityValidationError("Слишком короткое название города")
+
+              if not all(c.isalpha() or c in ['-', ' '] for c in city):
+                     logger.error(f"[{from_number}][{state}] - Недопустимые символы в названии города")
+                     raise CityValidationError("Недопустимые символы в названии города")
+       
+              if len(city) > 50:
+                     logger.error(f"[{from_number}][{state}] - Слишком длинное название города")
+                     raise CityValidationError("Слишком длинное название города")
+
               await update_city_by_phone(from_number, city)
               await set_lead_state(from_number, "awaiting_iin")
-              await send_whatsapp_response(from_number, 
-              "✅ Город сохранен\n"
-              "🔹 *Укажите ваш ИИН*"
-              )
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Некорректное название города\n"
-              "Пожалуйста, укажите реальный город проживания"
+              await send_whatsapp_response(
+              from_number,
+                            "✅ Город сохранен\n"
+                            "🔹 *Укажите ваш ИИН*\n"
+                            "Формат: 12 цифр без пробелов\n"
+                            "Пример: *123456789012*"
+                            )
+              logger.info(f"[{from_number}] Успешно сохранен город: {city}")
+
+       except CityValidationError:
+              await send_whatsapp_response(
+              from_number,
+              "❗ *Некорректное название городa*\n"
+              "Пожалуйста, укажите реальный город проживания\n"
+              "Примеры:\n"
+              "• Алматы\n"
+              "• Нур-Султан")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_city: {str(e)}", exc_info=True)
+              await send_whatsapp_response(
+              from_number,
+              "⚠️ Произошла техническая ошибка\n"
+              "Пожалуйста, попробуйте отправить город еще раз"
               )
 
     elif state == "awaiting_iin":
-       if is_valid_iin(message_text):
-              message_text = encrypt(message_text)
-              await update_iin_by_phone(from_number, message_text)
-              await send_whatsapp_response(from_number, 
-              "✅ ИИН принят\n"
+       try:
+              class IINValidationError(Exception):
+                     """Исключение для ошибок валидации ИИН"""
+                     pass
+
+              # Нормализация ввода - удаляем все нецифровые символы
+              clean_iin = ''.join(filter(str.isdigit, message_text.strip()))
+              
+              # Проверка валидности ИИН
+              if not is_valid_iin(clean_iin):
+                     logger.warning(f"[{from_number}] Неверный формат ИИН: {message_text[:12]}")
+                     raise IINValidationError("Неверный формат ИИН")
+
+              # Шифрование и сохранение
+              encrypted_iin = encrypt(clean_iin)
+              if not await update_iin_by_phone(from_number, encrypted_iin):
+                     raise Exception("Не удалось сохранить ИИН в базе данных")
+
+              # Отправка сообщения с выбором кредитов
+              credit_types_message = (
+              "✅ ИИН успешно принят!\n\n"
               "🔹 *Выберите типы ваших кредитов:*\n\n"
               "1. Потребительский кредит\n"
               "2. Залоговый кредит\n"
@@ -273,283 +351,554 @@ async def dialog_menedger(from_number: str, message_text: str):
               "6. Долги перед физ.лицами\n"
               "7. Алименты\n"
               "8. Другое\n\n"
-              "Можно выбрать несколько через запятую\n"
-              "Пример: *1, 4, 5*"
+              "📌 Можно выбрать несколько через запятую\n"
+              "Пример: *1, 3, 5* или *2, 7*"
               )
-              await set_lead_state(from_number, "awaiting_credit_types")
-       else:
-              await send_whatsapp_response(from_number, "❗ Неверный формат ИИН\n"
-              "Пожалуйста, укажите 12 цифр без пробелов")
+
+              await send_whatsapp_response(from_number, credit_types_message)
+              
+              # Переход к следующему состоянию
+              if not await set_lead_state(from_number, "awaiting_credit_types"):
+                     raise Exception("Не удалось обновить состояние пользователя")
+
+              logger.info(f"[{from_number}] ИИН успешно сохранен (зашифрован)")
+
+       except IINValidationError:
+              await send_whatsapp_response(
+              from_number,
+              "❗ Неверный формат ИИН\n\n"
+              "Требования:\n"
+              "• Ровно 12 цифр\n"
+              "• Без пробелов и других символов\n\n"
+              "Пример корректного ИИН:\n"
+              "*123456789012*"
+              )
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_iin: {str(e)}", exc_info=True)
+              await send_whatsapp_response(
+              from_number,
+              "⚠️ Произошла техническая ошибка\n"
+              "Пожалуйста, попробуйте отправить ИИН еще раз"
+              )
 
     elif state == "awaiting_credit_types":
-       selected = parse_credit_selection(message_text)
-       if selected:
-              await update_credit_types_by_phone(from_number, selected)
-              await set_lead_state(from_number, "awaiting_debt_amount")
-              await send_whatsapp_response(from_number, 
-              "✅ Данные сохранены\n"
-              "🔹 *Укажите общую сумму задолженности*\n"
-              "Можно указать примерную сумму в тенге\n"
-              "Если неизвестно - отправьте '-'"
-              )
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, выберите из списка\n"
-              "Пример: *1, 3, 5*"
+       try:
+              selected = parse_credit_selection(message_text)
+              if selected:
+                     if not await update_credit_types_by_phone(from_number, selected):
+                           raise Exception("Не удалось обновить бд пользователя")
+                           
+                     if not await set_lead_state(from_number, "awaiting_debt_amount"):
+                           raise Exception("Не удалось обновить состояние пользователя")
+                           
+                     await send_whatsapp_response(from_number, 
+                     "✅ Данные сохранены\n"
+                     "🔹 *Укажите общую сумму задолженности*\n"
+                     "Можно указать примерную сумму в тенге\n"
+                     "Если неизвестно - отправьте '-'"
+                     )
+              else:
+                     await send_whatsapp_response(from_number, 
+                     "❗ Пожалуйста, выберите из списка\n"
+                     "Пример: *1, 3, 5*"
+                     )
+                     return
+              
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_credit_types: {str(e)}", exc_info=True)
+              await send_whatsapp_response(
+              from_number,
+              "⚠️ Произошла техническая ошибка\n"
+              "Пожалуйста, попробуйте позже"
               )
 
     elif state == "awaiting_debt_amount":
-       if message_text == "-":
-              await send_whatsapp_response(from_number, 
-              "🔹 *Укажите ваш ежемесячный платеж по кредитам*\n"
-              "Пример: *120000 тг*\n"
-              "Если неизвестно - отправьте '-'"
+       try: 
+              if message_text == "-":
+                     if not await send_whatsapp_response(from_number, 
+                     "🔹 *Укажите ваш ежемесячный платеж по кредитам*\n"
+                     "Пример: *120000 тг*\n"
+                     "Если неизвестно - отправьте '-'"
+                     ):
+                           raise Exception("Не удалось отправить сообщение пользователю 'Укажите ваш ежемесячный платеж по кредитам'")
+                            
+                           
+
+                     if not await set_lead_state(from_number, "awaiting_monthly_payment"):
+                           raise Exception("Не удалось обновить состояние пользователя")
+                           
+              else:  
+                     totalDebt = extract_float_from_text(message_text)
+                     if totalDebt is not None:            
+                            if not await update_total_debt_by_phone(from_number, totalDebt):
+                                  raise Exception("Не удалось обновить totalDebt пользователя")
+                                  
+
+                            if not await send_whatsapp_response(from_number, 
+                                   "✅ Сумма задолженности сохранена\n"
+                                   "🔹 *Укажите ваш ежемесячный платеж*\n"
+                                   "Пример: *120000 тг*\n"
+                                   "Если неизвестно - отправьте '-'"
+                            ):
+                                  raise Exception("Не удалось отправить сообщение '✅ Сумма задолженности сохранена'")
+                            if not await set_lead_state(from_number, "awaiting_monthly_payment"):
+                                  raise Exception("Не удалось обновить состояние пользователя")
+                     else:
+                            if not await send_whatsapp_response(from_number, 
+                                   "❗ Не удалось распознать сумму\n"
+                                   "Пожалуйста, укажите число\n"
+                                   "Пример: *1000000 тг*"
+                            ):
+                                  raise Exception("Не удалось отправить сообщение пользователю '❗ Не удалось распознать сумму'")
+                                  
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_debt_amoun: {str(e)}", exc_info=True)
+              await send_whatsapp_response(
+              from_number,
+              "⚠️ Произошла техническая ошибка\n"
+              "Пожалуйста, попробуйте позже"
               )
-              await set_lead_state(from_number, "awaiting_monthly_payment")
-       else:  
-              totalDebt = extract_float_from_text(message_text)
-              if totalDebt is not None:            
-                     await update_total_debt_by_phone(from_number, totalDebt)
-                     await send_whatsapp_response(from_number, 
-                            "✅ Сумма задолженности сохранена\n"
-                            "🔹 *Укажите ваш ежемесячный платеж*\n"
-                            "Пример: *120000 тг*\n"
-                            "Если неизвестно - отправьте '-'"
-                     )
-                     await set_lead_state(from_number, "awaiting_monthly_payment")
-              else:
-                     await send_whatsapp_response(from_number, 
-                            "❗ Не удалось распознать сумму\n"
-                            "Пожалуйста, укажите число\n"
-                            "Пример: *1000000 тг*"
-                     )
 
     elif state == "awaiting_monthly_payment":
-       if message_text == "-":
-              await send_whatsapp_response(from_number, 
-              "🔹 *Есть ли у вас просрочки?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "waiting_has_overdue")
-       else:  
-              totalDebt = extract_float_from_text(message_text)
-              if totalDebt is not None:            
-                     await update_monthly_payment_by_phone(from_number, totalDebt)
-                     await send_whatsapp_response(from_number, 
-                            "✅ Данные сохранены\n"
-                            "🔹 *Есть ли у вас просрочки?*\n"
-                            "Ответьте Да/Нет"
+       try:         
+              if message_text == "-":
+                     if not await send_whatsapp_response(from_number, 
+                     "🔹 *Есть ли у вас просрочки?*\n"
+                     "Ответьте Да/Нет"
+                     ):
+                           raise Exception("Не удалось отправить сообщение пользователю 'Есть ли у вас просрочка ?'")
+                           
+                     if not await set_lead_state(from_number, "waiting_has_overdue"):
+                            raise Exception("Не удалось обновить состояние на waiting_has_overdue")
+                           
+              else:  
+                     totalDebt = extract_float_from_text(message_text)
+                     if totalDebt is not None:            
+                            if not await update_monthly_payment_by_phone(from_number, totalDebt):
+                                  raise Exception("Не удалось обновить данные totalDebt")
+                                  
+                            if not await send_whatsapp_response(from_number, 
+                                   "✅ Данные сохранены\n"
+                                   "🔹 *Есть ли у вас просрочки?*\n"
+                                   "Ответьте Да/Нет"
+                            ):
+                                  raise Exception("Не удалось отправить сообщение '*Есть ли у вас просрочки?*'")
+                            
+                            if not await set_lead_state(from_number, "waiting_has_overdue"):
+                                   raise Exception("Не удалось обновить состояние на waiting_has_overdue")
+                     else:
+                            if not await send_whatsapp_response(from_number, 
+                                   "❗ Не удалось распознать сумму\n"
+                                   "Пожалуйста, укажите число\n"
+                                   "Пример: *100000 тг*"
+                            ):
+                                  raise Exception("Не удалось отправить сообщение '❗ Не удалось распознать сумму'")
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_monthly_payment: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                     from_number,
+                     "⚠️ Произошла техническая ошибка\n"
+                     "Пожалуйста, попробуйте позже"
                      )
-                     await set_lead_state(from_number, "waiting_has_overdue")
-              else:
-                     await send_whatsapp_response(from_number, 
-                            "❗ Не удалось распознать сумму\n"
-                            "Пожалуйста, укажите число\n"
-                            "Пример: *100000 тг*"
-                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "waiting_has_overdue":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_overdue_by_phone(from_number, True)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Укажите количество дней просрочки*"
-              )
-              await set_lead_state(from_number, "awaiting_overdue_days")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await send_whatsapp_response(from_number, 
-              "🔹 *Есть ли у вас официальный доход?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_official_income")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_overdue_by_phone(from_number, True):
+                           raise Exception("Не удалось сохранить в БД 'has_overdue'")
+                     if not await send_whatsapp_response(from_number, 
+                     "🔹 *Укажите количество дней просрочки*"
+                     ):
+                           raise Exception("Не удалось отправить сообщение 'Укажите количество дней просрочки' ")
+                           
+                     if not await set_lead_state(from_number, "awaiting_overdue_days"):
+                           raise Exception("Не удалось обновить состояние на 'awaiting_overdue_days'")
+                           
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await send_whatsapp_response(from_number, 
+                     "🔹 *Есть ли у вас официальный доход?*\n"
+                     "Ответьте Да/Нет"
+                     ):
+                           raise Exception("Не удалось отправить сообщение '🔹 *Есть ли у вас официальный доход?'")
+                     if not await set_lead_state(from_number, "awaiting_has_official_income"):
+                           raise Exception("Не удалось обновить состояние на 'awaiting_has_official_income'")
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                     "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                           raise Exception(f"[{from_number}]Не удалось отправить сообщеие '❗ Пожалуйста, ответьте Да или Нет'")
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в waiting_has_overdue: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                     from_number,
+                     "⚠️ Произошла техническая ошибка\n"
+                     "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
     elif state == "awaiting_overdue_days":
-       await update_overdue_days_by_phone(from_number, message_text)
-       await send_whatsapp_response(from_number, 
-              "✅ Данные сохранены\n"
-              "🔹 *Есть ли у вас официальный доход?*\n"
-              "Ответьте Да/Нет"
-       )
-       await set_lead_state(from_number, "awaiting_has_official_income")
+       try:   
+              if not await update_overdue_days_by_phone(from_number, message_text):
+                    raise Exception ("Не удалось сохранить 'overdue_days'")
+              if not await send_whatsapp_response(from_number, 
+                     "✅ Данные сохранены\n"
+                     "🔹 *Есть ли у вас официальный доход?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                    raise Exception ("Не удалось отправить сообщение '✅ Данные сохранены'")
+                    
+              if not await set_lead_state(from_number, "awaiting_has_official_income"):
+                    raise Exception("Не удалось обновить состояние на 'awaiting_has_official_income'")
+                    
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_overdue_days: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                     from_number,
+                     "⚠️ Произошла техническая ошибка\n"
+                     "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
     elif state == "awaiting_has_official_income":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_official_income_by_phone(from_number, True)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Имеется ли у вас ТОО или ИП?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "waiting_has_business")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await send_whatsapp_response(from_number, 
-              "🔹 *Имеется ли у вас ТОО или ИП?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "waiting_has_business")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_official_income_by_phone(from_number, True):
+                            raise Exception("Не удалось сохранить в БД 'has_official_income' (True)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Имеется ли у вас ТОО или ИП?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Имеется ли у вас ТОО или ИП?'")
+
+              if not await set_lead_state(from_number, "waiting_has_business"):
+                     raise Exception("Не удалось обновить состояние на 'waiting_has_business'")
+
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await update_has_official_income_by_phone(from_number, False):
+                            raise Exception("Не удалось сохранить в БД 'has_official_income' (False)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Имеется ли у вас ТОО или ИП?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Имеется ли у вас ТОО или ИП?'")
+
+              if not await set_lead_state(from_number, "waiting_has_business"):
+                     raise Exception("Не удалось обновить состояние на 'waiting_has_business'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_has_official_income: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "waiting_has_business":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_business_by_phone(from_number, True)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Имеется ли у вас имущество?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_property")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await send_whatsapp_response(from_number, 
-              "🔹 *Имеется ли у вас имущество?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_property")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_business_by_phone(from_number, True):
+                            raise Exception("Не удалось сохранить в БД 'has_business' (True)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Имеется ли у вас имущество?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Имеется ли у вас имущество?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_property"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_property'")
+
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await update_has_business_by_phone(from_number, False):
+                            raise Exception("Не удалось сохранить в БД 'has_business' (False)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Имеется ли у вас имущество?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Имеется ли у вас имущество?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_property"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_property'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в waiting_has_business: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "awaiting_has_property":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_property_by_phone(from_number, True)
-              await send_whatsapp_response(from_number,
-              "🔹 *Укажите ваше имущество:*\n\n"
-              "1. Дом\n2. Квартира\n3. Гараж\n4. Доля\n"
-              "5. Автомобиль\n6. Акции\n7. Другое\n8. Нет имущества\n\n"
-              "Можно выбрать несколько через запятую\n"
-              "Пример: *1, 3, 5*"
-              )
-              await set_lead_state(from_number, "awaiting_property_types")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await send_whatsapp_response(from_number, 
-              "🔹 *Есть ли у вас супруг(а)?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, " awaiting_has_spouse")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_property_by_phone(from_number, True):
+                            raise Exception("Не удалось сохранить в БД 'has_property' (True)")
+
+              if not await send_whatsapp_response(from_number,
+                     "🔹 *Укажите ваше имущество:*\n\n"
+                     "1. Дом\n2. Квартира\n3. Гараж\n4. Доля\n"
+                     "5. Автомобиль\n6. Акции\n7. Другое\n8. Нет имущества\n\n"
+                     "Можно выбрать несколько через запятую\n"
+                     "Пример: *1, 3, 5*"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Укажите ваше имущество'")
+
+              if not await set_lead_state(from_number, "awaiting_property_types"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_property_types'")
+
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await update_has_property_by_phone(from_number, False):
+                            raise Exception("Не удалось сохранить в БД 'has_property' (False)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Есть ли у вас супруг(а)?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Есть ли у вас супруг(а)?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_spouse"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_spouse'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_has_property: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "awaiting_property_types":
-       selected = parse_buisness_selection(message_text)
-       if selected:
-              await update_property_types_by_phone(from_number, selected)
-              await send_whatsapp_response(from_number, 
-              "✅ Данные сохранены\n"
-              "🔹 *Есть ли у вас супруг(а)?*\n"
-              "Ответьте Да/Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_spouse")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, выберите из списка\n"
-              "Пример: *1, 3, 5*"
-              )
+       try:
+              selected = parse_buisness_selection(message_text)
+              if selected:
+                     if not await update_property_types_by_phone(from_number, selected):
+                            raise Exception("Не удалось сохранить в БД 'property_types'")
+
+              if not await send_whatsapp_response(from_number, 
+                     "✅ Данные сохранены\n"
+                     "🔹 *Есть ли у вас супруг(а)?*\n"
+                     "Ответьте Да/Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Есть ли у вас супруг(а)?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_spouse"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_spouse'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, выберите из списка\n"
+                            "Пример: *1, 3, 5*"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, выберите из списка'")
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_property_types: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "awaiting_has_spouse":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_spouse_by_phone(from_number, True)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
-              "Ответьте Да или Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_children")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await send_whatsapp_response(from_number, 
-              "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
-              "Ответьте Да или Нет"
-              )
-              await set_lead_state(from_number, "awaiting_has_children")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_spouse_by_phone(from_number, True):
+                            raise Exception("Не удалось сохранить в БД 'has_spouse' (True)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
+                     "Ответьте Да или Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Есть ли у вас несовершеннолетние дети?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_children"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_children'")
+
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await update_has_spouse_by_phone(from_number, False):
+                            raise Exception("Не удалось сохранить в БД 'has_spouse' (False)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
+                     "Ответьте Да или Нет"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Есть ли у вас несовершеннолетние дети?'")
+
+              if not await set_lead_state(from_number, "awaiting_has_children"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_has_children'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_has_spouse: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "awaiting_has_children":
-       msg = message_text.strip().lower()
-       if msg in ["да", "есть", "да есть", "да, есть"]:
-              await update_has_children_by_phone(from_number, True)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Выберите ваш социальный статус:*\n\n"
-              "1. Лицо с инвалидностью\n2. Получатель АСП\n"
-              "3. Многодетная семья\n4. Иные пособия/льготы\n"
-              "5. Не отношусь к льготным категориям\n\n"
-              "Можно выбрать несколько через запятую\n"
-              "Пример: *2, 3*"
-              )
-              await set_lead_state(from_number, "awaiting_social_status")
-       elif msg in ["нет", "не было", "отсутствует"]:
-              await update_has_children_by_phone(from_number, False)
-              await send_whatsapp_response(from_number, 
-              "🔹 *Выберите ваш социальный статус:*\n\n"
-              "1. Лицо с инвалидностью\n2. Получатель АСП\n"
-              "3. Многодетная семья\n4. Иные пособия/льготы\n"
-              "5. Не отношусь к льготным категориям\n\n"
-              "Можно выбрать несколько через запятую\n"
-              "Пример: *2, 3*"
-              )
-              await set_lead_state(from_number, "awaiting_social_status")
-       else:
-              await send_whatsapp_response(from_number, 
-              "❗ Пожалуйста, ответьте Да или Нет"
-              )
+       try:
+              msg = message_text.strip().lower()
+              if msg in ["да", "есть", "да есть", "да, есть"]:
+                     if not await update_has_children_by_phone(from_number, True):
+                            raise Exception("Не удалось сохранить в БД 'has_children' (True)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Выберите ваш социальный статус:*\n\n"
+                     "1. Лицо с инвалидностью\n2. Получатель АСП\n"
+                     "3. Многодетная семья\n4. Иные пособия/льготы\n"
+                     "5. Не отношусь к льготным категориям\n\n"
+                     "Можно выбрать несколько через запятую\n"
+                     "Пример: *2, 3*"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Выберите ваш социальный статус'")
+
+              if not await set_lead_state(from_number, "awaiting_social_status"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_social_status'")
+
+              elif msg in ["нет", "не было", "отсутствует"]:
+                     if not await update_has_children_by_phone(from_number, False):
+                            raise Exception("Не удалось сохранить в БД 'has_children' (False)")
+
+              if not await send_whatsapp_response(from_number, 
+                     "🔹 *Выберите ваш социальный статус:*\n\n"
+                     "1. Лицо с инвалидностью\n2. Получатель АСП\n"
+                     "3. Многодетная семья\n4. Иные пособия/льготы\n"
+                     "5. Не отношусь к льготным категориям\n\n"
+                     "Можно выбрать несколько через запятую\n"
+                     "Пример: *2, 3*"
+              ):
+                     raise Exception("Не удалось отправить сообщение 'Выберите ваш социальный статус'")
+
+              if not await set_lead_state(from_number, "awaiting_social_status"):
+                     raise Exception("Не удалось обновить состояние на 'awaiting_social_status'")
+
+              else:
+                     if not await send_whatsapp_response(from_number, 
+                            "❗ Пожалуйста, ответьте Да или Нет"
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
+
+       except Exception as e:
+              logger.error(f"[{from_number}] Ошибка в awaiting_has_children: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка\n"
+                            "Пожалуйста, попробуйте позже"
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
+
 
     elif state == "awaiting_social_status":
        try:
               selected = parse_social_status_selection(message_text)
               if not selected:
-                     await send_whatsapp_response(
+                     if not await send_whatsapp_response(
                             from_number,
                             "❗ Пожалуйста, выберите из списка\nПример: *1, 2, 3*"
-                     )
+                     ):
+                            raise Exception("Не удалось отправить сообщение 'Пожалуйста, выберите из списка'")
                      return
 
-              # 1. Обновляем социальный статус
-              await update_social_status_by_phone(from_number, selected)
+              if not await update_social_status_by_phone(from_number, selected):
+                     raise Exception("Не удалось сохранить в БД 'social_status'")
 
-              # 4. Отправляем сообщение клиенту
-              await send_whatsapp_response(
+              if not await send_whatsapp_response(
               from_number,
               "✅ Анкета успешно заполнена!\n"
               "Наш специалист свяжется с вами в ближайшее время.\n\n"
               "Спасибо за предоставленную информацию!"
-              )
-              
-              # 2. Генерируем описание проблемы
-              base = """Твоя задача - создать краткое описание проблемы клиента для юристов  это сообщение пойдет в Bitrix24 и мы юристы из Казахстана, не ставь нигде ** и * если что надо сделать жирным ьексьом используй такую конструкцию [b]Дети:[/b]"""
+              ):
+                     raise Exception("Не удалось отправить сообщение о завершении анкеты")
+
+              # Генерируем описание проблемы через GPT
+              base = """Твоя задача - создать краткое описание проблемы клиента для юристов  это сообщение пойдет в Bitrix24 и мы юристы из Казахстана, не ставь нигде ** и * если что надо сделать жирным текстом используй такую конструкцию [b]Дети:[/b]"""
               problem = await generate_reply(from_number, "", base)
-              await update_problem_description_by_phone(from_number, problem)
-              
-              # 3. Логируем в консоль (для отладки)
-              print("✅ Анкета заполнена для номера:", from_number)
-              
-              
-              
-              # 5. Получаем данные и отправляем в Bitrix24
+
+              if not await update_problem_description_by_phone(from_number, problem):
+                     raise Exception("Не удалось обновить описание проблемы в БД")
+
+              logger.info(f"✅ Анкета заполнена для номера: {from_number}")
+
+              # Получаем полные данные клиента для Bitrix24
               client_data = await get_full_client_data(from_number)
               if not client_data:
-                     await send_whatsapp_response(from_number, "❌ Ошибка при обработке ваших данных")
+                     if not await send_whatsapp_response(from_number, "❌ Ошибка при обработке ваших данных"):
+                            raise Exception("Не удалось отправить сообщение об ошибке обработки данных")
                      return
-              
+
               bitrix_result = await send_lead_to_bitrix(client_data)
-              
-              # Дополнительная проверка результата
-              if not bitrix_result or 'error' in bitrix_result:
-                     print("⚠️ Ошибка при отправке в Bitrix24:", bitrix_result.get('error', 'Unknown error'))
-              
+
+              if not bitrix_result or ('error' in bitrix_result):
+                     logger.warning(f"⚠️ Ошибка при отправке в Bitrix24: {bitrix_result.get('error', 'Unknown error')}")
+
        except Exception as e:
-              print(f"❌ Критическая ошибка в обработчике: {str(e)}")
-              await send_whatsapp_response(
-              from_number,
-              "⚠️ Произошла техническая ошибка. Пожалуйста, попробуйте позже."
-              )
+              logger.error(f"[{from_number}] Критическая ошибка в awaiting_social_status: {str(e)}", exc_info=True)
+              try:
+                     await send_whatsapp_response(
+                            from_number,
+                            "⚠️ Произошла техническая ошибка. Пожалуйста, попробуйте позже."
+                     )
+              except Exception as send_error:
+                     logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)

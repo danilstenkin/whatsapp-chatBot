@@ -3,9 +3,8 @@ from app.services.create_task_in_bitrix import send_lead_to_bitrix
 from typing import Optional, Dict, Any
 import logging
 from app.services.security import decrypt
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # или DEBUG
+from app.logger_config import logger
+import asyncpg
 
 # Консольный вывод
 handler = logging.StreamHandler()
@@ -13,8 +12,6 @@ formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-from app.config import DATABASE_URL
-import asyncpg
 
 
 
@@ -23,8 +20,12 @@ async def update_full_name_by_phone(phone: str, full_name: str):
         UPDATE clients
         SET full_name = :full_name
         WHERE phone = :phone
+        RETURNING id
     """
-    await db.execute(query, {"phone": phone, "full_name": full_name})
+    if await db.fetch_one(query, {"phone": phone, "full_name": full_name}):
+        logger.debug(f"[{phone}][DB-clients] - ФИО сохранено")
+    else:
+        logger.error(f"[{phone}][DB-clients] - не удалось сохранить ")
 
 async def update_city_by_phone(phone: str, city: str) -> bool:
     query = """
@@ -182,7 +183,7 @@ async def get_full_client_data(phone: str) -> Optional[Dict[str, Any]]:
     conn = None
     try:
         # Подключаемся к базе данных
-        conn = await asyncpg.connect(DATABASE_URL)
+        conn = await asyncpg.connect(db)
         
         # Получаем данные клиента
         record = await conn.fetchrow(

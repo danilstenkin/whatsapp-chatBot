@@ -19,12 +19,14 @@ async def get_lead_state(phone: str) -> str | None:
 
 async def save_lead_state(phone: str):
     if await redis_client.set(phone, "gpt_problem_empathy", ex=REDIS_TTL):
-        logger.info(f"[REDIS][{phone}] - Первое состояние успешно сохранино в Redis")
+        logger.info(f"[REDIS][{phone}] - Первое состояние успешно сохранeно в Redis")
     else:
         logger.error(f"['REDIS'][{phone}] - Не удалось сохранить первое состояние в Redis")
  
 async def set_lead_state(phone: str, state: str) -> bool:
     if await redis_client.set(phone, state):
-        logger.info(f"[REDIS][{phone}][{state}] -  состояние успешно сохранино в Redis")
+        logger.info(f"[REDIS][{phone}][{state}] -  состояние успешно сохранeно в Redis")
+        return True
     else:
         logger.error(f"[REDIS][{phone}][{state}] - Не удалось сохранить первое состояние в Redis")
+        return False
