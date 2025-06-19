@@ -1,2 +1,44 @@
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Logs
+*.log
 chatbot_logs_*.log
+
+# Environment files
+.env
+.env.*
+
+# Docker
+docker-compose.override.yml
+*.pid
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.swp
+*.tmp
+
+# Pytest cache
+.pytest_cache/
+
+# IDEs
+.idea/
+.vscode/

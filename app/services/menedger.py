@@ -31,9 +31,10 @@ from app.workers.queue_senders import queue_whatsapp_message
 
 
 async def dialog_menedger(from_number: str, message_text: str):
-    
+
     state = await get_lead_state(from_number)
 
+# ======================= STATE: INITIAL GREETING (state is None) ============================
     if state is None:
         welcome_text = (
             "Здравствуйте! 👋\n"
@@ -55,7 +56,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as inner_e:
                      logger.error(f"[{from_number}] - Ошибка при отправке сообщения об ошибке: {str(inner_e)}", exc_info=True)
 
-            
+# ======================= STATE: gpt_problem_empathy (Первичный сбор информации, сочувствие) ============================         
     elif state == "gpt_problem_empathy":
        try:
               logger.info(f"Начало обработки состояния gpt_problem_empathy для {from_number}")
@@ -88,7 +89,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               await queue_whatsapp_message(from_number, error_message)
               logger.error(f"[{from_number}][{state}] - Пользователю {from_number} отправлено сообщение об ошибке")
 
-
+# ======================= STATE: gpt_problem_dig_deeper (Уточнение деталей проблемы клиента) ============================
     elif state == "gpt_problem_dig_deeper":
        try:
               logger.info(f"[DEEP DIVE] Начало обработки для {from_number}")
@@ -134,7 +135,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               
               logger.info(f"[{from_number}] - Отправлен fallback-ответ и осуществлен переход")
 
-
+# ======================= STATE: gpt_offer_consultation (Предложение консультации клиенту) ============================
     elif state == "gpt_offer_consultation":   
           try:
                 logger.info(f"[CONSULTATION OFFER] - Начало обработки для {from_number}")
@@ -142,37 +143,31 @@ async def dialog_menedger(from_number: str, message_text: str):
 
                 base = """
               Ты — ведущий Казахстанский юрист-консультант YCG. Сформулируй ответ клиенту по следующим правилам:
-
               1. Формат ответа:
               Исходя из описанной ситуации с {кратко_суть_проблемы}, мы наблюдаем {основные_риски}.
               Не задавай ни одного вопроса Будь краток и твоя главная задача убедить человека что ему надо к нам придти
               Когда хочешь сделать текст жирным делай вот так ->  *привет*
-
               2. Требования к стилю:
               ▸ Строго на "Вы"
               ▸ Уважительно, но твердо
               ▸ Без вопросов в конце
               ▸ Без фраз "хотите записаться?"
               ▸ Акцент на срочность и бесплатность
-
               3. Пример ответа:
               «Анализируя вашу ситуацию с долгами в 3 банках, мы видим риски:
               - Возможность ареста имущества в течение месяца
               - Рост задолженности на 15-20% ежеквартально
-
               Только после изучения договоров и судебной практики по вашему региону мы сможем:
               - Определить законные основания для отсрочки
               - Предложить варианты реструктуризации
               - Защитить ваши права как заемщика
-
               Запишитесь на бесплатную консультацию в YCG — это единственный способ получить точный прогноз и план действий.»
-
               5. Запрещено:
               × Давать конкретные юридические советы
               × Использовать шаблонные фразы
               × Упоминать конкурентов
               """
-       
+                
                 await save_message(from_number, message_text, role="user")
                 logger.debug(f"[{from_number}][{state}] - сообщение пользователя сохранено в историю")
 
@@ -185,7 +180,6 @@ async def dialog_menedger(from_number: str, message_text: str):
                      logger.error(f"[{from_number}][{state}] - GPT вернул неполноценный ответ")
                      raise ValueError("Недостаточный ответ от GPT")
 
-              # Собираем финальный текст сразу с приглашением
                 final_reply = (
                      f"{reply.strip()}\n\n"
                      "✅ Готовы ли Вы записаться на бесплатную консультацию?\n"
@@ -205,7 +199,6 @@ async def dialog_menedger(from_number: str, message_text: str):
           except Exception as e:
                 logger.error(f"[{from_number}][{state}] - Критическая ошибка в gpt_offer_consultation: {str(e)}", exc_info=True)
 
-
                 fallback_msg = (
               "Благодарю за информацию. Для точной оценки вашего случая "
               "необходима консультация юриста YCG. Это бесплатно и ни к чему не обязывает. "
@@ -216,9 +209,8 @@ async def dialog_menedger(from_number: str, message_text: str):
                 await set_lead_state(from_number, "questionnaire")
                 logger.info(f"[{from_number}][{state}] - Отправлен fallback-вариант для {from_number}")
 
-
+# ======================= STATE: questionnaire (Опрос клиента перед анкетой) ============================
     elif state == "questionnaire":
-       
        try:
              logger.info(f"[{from_number} - начало обработки состояния questionnaire")
 
@@ -243,9 +235,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.error(f"[{from_number}] Ошибка в состоянии questionnaire: {str(e)}", exc_info=True)
               await queue_whatsapp_message(from_number, "Извините, произошла техническая ошибка. Пожалуйста, попробуйте еще раз.")
 
-
-
-
+# ======================= STATE: awaiting_full_name (Ожидание полного ФИО клиента) ============================
     elif state == "awaiting_full_name":
        try:
              cleaned_name = message_text.strip()
@@ -268,8 +258,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "📍 *В каком городе вы проживаете?*\n"
               "Пример: *Нур-Султан* или *Алматы*"
         )
-
-             
+    
        except Exception as e:
         logger.error(f"FullName processing error for {from_number}: {str(e)}")
         await queue_whatsapp_message(
@@ -278,12 +267,10 @@ async def dialog_menedger(from_number: str, message_text: str):
             "попробуйте отправить ФИО еще раз."
         )
 
-
-
+# ======================= STATE: awaiting_city (Ожидание города клиента) ============================
     elif state == "awaiting_city":
        try:
               class CityValidationError(Exception):
-                     """Кастомное исключение для ошибок валидации города"""
                      pass
 
               city = message_text.strip().title()
@@ -327,26 +314,22 @@ async def dialog_menedger(from_number: str, message_text: str):
               "Пожалуйста, попробуйте отправить город еще раз"
               )
 
+# ======================= STATE: awaiting_iin (Ожидание ИИН клиента) ============================
     elif state == "awaiting_iin":
        try:
               class IINValidationError(Exception):
-                     """Исключение для ошибок валидации ИИН"""
                      pass
 
-              # Нормализация ввода - удаляем все нецифровые символы
               clean_iin = ''.join(filter(str.isdigit, message_text.strip()))
               
-              # Проверка валидности ИИН
               if not is_valid_iin(clean_iin):
                      logger.warning(f"[{from_number}] Неверный формат ИИН: {message_text[:12]}")
                      raise IINValidationError("Неверный формат ИИН")
 
-              # Шифрование и сохранение
               encrypted_iin = encrypt(clean_iin)
               if not await update_iin_by_phone(from_number, encrypted_iin):
                      raise Exception("Не удалось сохранить ИИН в базе данных")
 
-              # Отправка сообщения с выбором кредитов
               credit_types_message = (
               "✅ ИИН успешно принят!\n\n"
               "🔹 *Выберите типы ваших кредитов:*\n\n"
@@ -361,10 +344,8 @@ async def dialog_menedger(from_number: str, message_text: str):
               "📌 Можно выбрать несколько через запятую\n"
               "Пример: *1, 3, 5* или *2, 7*"
               )
-
               await queue_whatsapp_message(from_number, credit_types_message)
               
-              # Переход к следующему состоянию
               if not await set_lead_state(from_number, "awaiting_credit_types"):
                      raise Exception("Не удалось обновить состояние пользователя")
 
@@ -389,6 +370,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "Пожалуйста, попробуйте отправить ИИН еще раз"
               )
 
+# ======================= STATE: awaiting_credit_types (Выбор типа кредитов клиента) ============================
     elif state == "awaiting_credit_types":
        try:
               selected = parse_credit_selection(message_text)
@@ -419,7 +401,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте позже"
               )
-
+# ======================= STATE: awaiting_debt_amount (Указание суммы долга) ============================
     elif state == "awaiting_debt_amount":
        try: 
               if message_text == "-":
@@ -428,9 +410,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      "Пример: *120000 тг*\n"
                      "Если неизвестно - отправьте '-'"
                      ):
-                           raise Exception("Не удалось отправить сообщение пользователю 'Укажите ваш ежемесячный платеж по кредитам'")
-                            
-                           
+                           raise Exception("Не удалось отправить сообщение пользователю 'Укажите ваш ежемесячный платеж по кредитам'")            
 
                      if not await set_lead_state(from_number, "awaiting_monthly_payment"):
                            raise Exception("Не удалось обновить состояние пользователя")
@@ -439,8 +419,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      totalDebt = extract_float_from_text(message_text)
                      if totalDebt is not None:            
                             if not await update_total_debt_by_phone(from_number, totalDebt):
-                                  raise Exception("Не удалось обновить totalDebt пользователя")
-                                  
+                                  raise Exception("Не удалось обновить totalDebt пользователя")           
 
                             if not await queue_whatsapp_message(from_number, 
                                    "✅ Сумма задолженности сохранена\n"
@@ -466,7 +445,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте позже"
               )
-
+# ======================= STATE: awaiting_monthly_payment (Ежемесячный платёж) ============================
     elif state == "awaiting_monthly_payment":
        try:         
               if message_text == "-":
@@ -512,7 +491,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: waiting_has_overdue (Есть ли просрочки) ============================
     elif state == "waiting_has_overdue":
        try:
               msg = message_text.strip().lower()
@@ -551,6 +530,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
+# ======================= STATE: awaiting_overdue_days (Количество дней просрочки) ============================
     elif state == "awaiting_overdue_days":
        try:   
               if not await update_overdue_days_by_phone(from_number, message_text):
@@ -576,6 +556,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
+# ======================= STATE: awaiting_has_official_income (Есть ли официальный доход) ============================
     elif state == "awaiting_has_official_income":
        try:
               msg = message_text.strip().lower()
@@ -622,7 +603,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: waiting_has_business (Есть ли свой бизнес) ============================
     elif state == "waiting_has_business":
        try:
               msg = message_text.strip().lower()
@@ -669,7 +650,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: awaiting_has_property (Есть ли имущество) ============================
     elif state == "awaiting_has_property":
        try:
               msg = message_text.strip().lower()
@@ -719,7 +700,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: awaiting_property_types (Типы имущества) ============================
     elif state == "awaiting_property_types":
        try:
               selected = parse_buisness_selection(message_text)
@@ -754,7 +735,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: awaiting_has_spouse (Наличие супруга/супруги) ============================
     elif state == "awaiting_has_spouse":
        try:
               msg = message_text.strip().lower()
@@ -801,7 +782,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: awaiting_has_children (Наличие детей) ============================
     elif state == "awaiting_has_children":
        try:
               msg = message_text.strip().lower()
@@ -856,7 +837,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               except Exception as send_error:
                      logger.error(f"[{from_number}] Ошибка при отправке сообщения об ошибке: {str(send_error)}", exc_info=True)
 
-
+# ======================= STATE: awaiting_social_status (Социальный статус) ============================
     elif state == "awaiting_social_status":
        try:
               selected = parse_social_status_selection(message_text)
@@ -879,7 +860,6 @@ async def dialog_menedger(from_number: str, message_text: str):
               ):
                      raise Exception("Не удалось отправить сообщение о завершении анкеты")
 
-              # Генерируем описание проблемы через GPT
               base = """Твоя задача - создать краткое описание проблемы клиента для юристов  это сообщение пойдет в Bitrix24 и мы юристы из Казахстана, не ставь нигде ** и * если что надо сделать жирным текстом используй такую конструкцию [b]Дети:[/b]"""
               problem = await generate_reply(from_number, "", base)
 
@@ -888,7 +868,6 @@ async def dialog_menedger(from_number: str, message_text: str):
 
               logger.info(f"✅ Анкета заполнена для номера: {from_number}")
 
-              # Получаем полные данные клиента для Bitrix24
               client_data = await get_full_client_data(from_number)
               if not client_data:
                      if not await queue_whatsapp_message(from_number, "❌ Ошибка при обработке ваших данных"):
