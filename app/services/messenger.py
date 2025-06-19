@@ -1,81 +1,73 @@
 import httpx
+import asyncio
 from app.config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
 from app.logger_config import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from aiolimiter import AsyncLimiter
 
-async def send_whatsapp_response(to_number: str, message: str):
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-    
-    data = {
-        'From': TWILIO_WHATSAPP_NUMBER,
-        'To': f'whatsapp:{to_number}',
-        'Body': message
-    }
+# Ограничитель скорости: 1 сообщение в секунду
+limiter = AsyncLimiter(1, 1)
 
-    auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, data=data, auth=auth)
-            if response.status_code == 201:
-                sid = response.json().get("sid")
-                logger.info(f"[TWILIO][{to_number}] - ✅ Сообщение успешно отправлено! SID: {sid}")
-                return True
-            else:
+RETRY_BASE_DELAY = 1
+MAX_RETRIES = 5
+TIMEOUT = 10.0
+
+class TwilioAPIError(Exception):
+    pass
+
+@retry(
+    stop=stop_after_attempt(MAX_RETRIES),
+    wait=wait_exponential(multiplier=RETRY_BASE_DELAY, min=RETRY_BASE_DELAY, max=30),
+    retry=retry_if_exception_type((httpx.RequestError, TwilioAPIError)),
+    reraise=True
+)
+async def send_whatsapp_response(to_number: str, message: str) -> bool:
+    async with limiter:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        
+        data = {
+            'From': TWILIO_WHATSAPP_NUMBER,
+            'To': f'whatsapp:{to_number}',
+            'Body': message
+        }
+
+        headers = {
+            'User-Agent': 'MyApp/1.0',
+            'Accept': 'application/json'
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                response = await client.post(
+                    url,
+                    data=data,
+                    auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                    headers=headers
+                )
+
+                if response.status_code == 201:
+                    sid = response.json().get("sid")
+                    logger.info(f"[TWILIO][{to_number}] Сообщение отправлено. SID: {sid}")
+                    return True
+
                 error_data = response.json()
-                logger.error(f"[TWILIO][{to_number}] - ❌ Ошибка отправки (код {response.status_code}): {error_data}")
-                return False
+                error_code = error_data.get('code', 'unknown')
+                error_msg = error_data.get('message', 'No error message')
 
-    except httpx.HTTPStatusError as e:
-        print(f"🚨 HTTP ошибка при отправке сообщения:")
-        print(f"URL: {e.request.url}")
-        print(f"Status Code: {e.response.status_code}")
-        print(f"Response: {e.response.text}")
-        return False
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 1))
+                    logger.warning(f"[TWILIO][{to_number}] Rate limit. Retry after {retry_after}s")
+                    await asyncio.sleep(retry_after)
+                    raise TwilioAPIError("Rate limit exceeded")
 
-    except httpx.RequestError as e:
-        print(f"🚨 Ошибка соединения с Twilio API:")
-        print(f"Request: {e.request}")
-        print(f"Error: {str(e)}")
-        return False
+                logger.error(f"[TWILIO][{to_number}] Ошибка {error_code}: {error_msg}")
+                raise TwilioAPIError(f"Twilio API error: {error_code} - {error_msg}")
 
-    except Exception as e:
-        print(f"🚨 Неожиданная ошибка:")
-        print(f"Type: {type(e).__name__}")
-        print(f"Error: {str(e)}")
-        return False
-    
+        except httpx.RequestError as e:
+            logger.error(f"[TWILIO][{to_number}] Сетевая ошибка: {str(e)}")
+            raise
+        except Exception as e:
+            logger.exception(f"[TWILIO][{to_number}] Неожиданная ошибка: {str(e)}")
+            raise TwilioAPIError(str(e))
 
-    
-# import httpx
-# from app.config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
-
-# async def send_whatsapp_response(to_number: str, message: str):
-#     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-
-#     data = {
-#         'From': TWILIO_WHATSAPP_NUMBER,
-#         'To': f'whatsapp:{to_number}',
-#         'Body': message
-#     }
-
-#     auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-#     try:
-#         async with httpx.AsyncClient(timeout=30.0) as client:
-#             response = await client.post(url, data=data, auth=auth)
-
-#             # ❌ НЕ вызываем raise_for_status
-
-#             if response.status_code == 201:
-#                 sid = response.json().get("sid")
-#                 print(f"✅ Сообщение успешно отправлено! SID: {sid}")
-#                 return True
-#             else:
-#                 error_data = response.json()
-#                 print(f"⚠️ Не удалось отправить сообщение (status: {response.status_code})")
-#                 print(f"Twilio Error: {error_data.get('message')}")
-#                 print(message)
-#                 return False
-
-#     except Exception as e:
-#         print(f"❗ Ошибка при отправке сообщения: {str(e)}")
-#         return False
+    return False
