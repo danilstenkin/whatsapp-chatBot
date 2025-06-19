@@ -47,4 +47,3 @@ uvicorn==0.34.3
 yarl==1.20.0
 colorlog==6.8.2
 gunicorn==21.2.0
-

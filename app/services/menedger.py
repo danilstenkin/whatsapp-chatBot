@@ -1,5 +1,4 @@
 from app.db.database import save_message
-from app.services.messenger import send_whatsapp_response
 from app.services.deepSeek import generate_reply
 from app.db.redis_client import set_lead_state, save_lead_state, get_lead_state
 from app.validators.user_data import is_valid_full_name, is_valid_iin, extract_float_from_text
@@ -45,8 +44,7 @@ async def dialog_menedger(from_number: str, message_text: str):
             "Расскажите, пожалуйста, с какой проблемой вы столкнулись? Мы постараемся вам помочь 🤝"
         )
         await save_lead_state(phone=from_number)
-        #await send_whatsapp_response(from_number, welcome_text)
-        await queue_whatsapp_message(from_number, welcome_text )
+        await queue_whatsapp_message(from_number, welcome_text)
             
 
 
@@ -70,7 +68,7 @@ async def dialog_menedger(from_number: str, message_text: str):
 
               reply = await generate_reply(from_number, message_text, base_prompt)
 
-              await send_whatsapp_response(from_number, reply)
+              await queue_whatsapp_message(from_number, reply)
               await save_message(from_number, reply, role="assistant")
 
               if await set_lead_state(from_number, "gpt_problem_dig_deeper"):
@@ -80,7 +78,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.error(f"[{from_number}][{state}] - Ошибка в состоянии gpt_problem_empathy для {from_number}: {str(e)}", exc_info=True)
               
               error_message = "Извините, возникла техническая ошибка. Пожалуйста, попробуйте написать позже."
-              await send_whatsapp_response(from_number, error_message)
+              await queue_whatsapp_message(from_number, error_message)
               logger.error(f"[{from_number}][{state}] - Пользователю {from_number} отправлено сообщение об ошибке")
 
 
@@ -110,7 +108,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      logger.error(f"[{from_number}][{state}] - GPT вернул пустой или слишком короткий ответ")
                      raise ValueError("Невалидный ответ от GPT")
 
-              await send_whatsapp_response(from_number, gpt_reply)
+              await queue_whatsapp_message(from_number, gpt_reply)
               await save_message(from_number, gpt_reply, role="assistant")
               logger.info(f"[{from_number}][{state}] - Ответ успешно отправлен и сохранен")
 
@@ -124,7 +122,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.error(f"[{from_number}][{state}] - Ошибка в gpt_problem_dig_deeper: {str(e)}", exc_info=True)
               
               fallback_msg = "Благодарю за информацию. Чтобы предложить решение, мне нужно уточнить один момент. Расскажите, как давно у вас эта проблема?"
-              await send_whatsapp_response(from_number, fallback_msg)
+              await queue_whatsapp_message(from_number, fallback_msg)
               await set_lead_state(from_number, "gpt_offer_consultation")
               
               logger.info(f"[{from_number}] - Отправлен fallback-ответ и осуществлен переход")
@@ -176,26 +174,26 @@ async def dialog_menedger(from_number: str, message_text: str):
                 exec_time = (datetime.now() - start_time).total_seconds()
                 logger.info(f"[{from_number}][{state}] - GPT ответ сгенирован за {exec_time:.2f} сек")
 
-                if not generate_reply or len(reply.strip()) < 20:
-                      logger.error(f"[{from_number}][{state}] - GPT вернул неполноценный ответ")
-                      raise ValueError("Недостаточный ответ от GPT")
+                if not reply or len(reply.strip()) < 20:
+                     logger.error(f"[{from_number}][{state}] - GPT вернул неполноценный ответ")
+                     raise ValueError("Недостаточный ответ от GPT")
 
-                await send_whatsapp_response(from_number, reply)
-                logger.info(f"[{from_number}][{state}] - отправлен ответ от GPT")
-                await save_message(from_number, reply, role="assistant")
-                logger.info(f"[{from_number}][{state}] - GPT ответ сохранен в БД")
+              # Собираем финальный текст сразу с приглашением
+                final_reply = (
+                     f"{reply.strip()}\n\n"
+                     "✅ Готовы ли Вы записаться на бесплатную консультацию?\n"
+                     "Пожалуйста, напишите: Да или Нет"
+                     )
 
-                confirmation_msg = "✅ Готовы ли Вы записаться на бесплатную консультацию?\nПожалуйста, напишите: Да или Нет"
-                try:
-                     sent = await send_whatsapp_response(from_number, confirmation_msg)
-                     if not sent:
-                            logger.error(f"[{from_number}][{state}] - Не удалось отправить подтверждение")
+                await queue_whatsapp_message(from_number, final_reply)
+                logger.info(f"[{from_number}][{state}] - отправлен финальный ответ")
 
-                except Exception as e:
-                     logger.error(f"[{from_number}][{state}] - Ошибка отправки: {str(e)}")
+                await save_message(from_number, final_reply, role="assistant")
+                logger.info(f"[{from_number}][{state}] - ответ сохранен в БД")
 
                 await set_lead_state(from_number, "questionnaire")
                 logger.info(f"[{from_number}][{state}] - переход на состояние -> 'questionnaire'")
+
 
           except Exception as e:
                 logger.error(f"[{from_number}][{state}] - Критическая ошибка в gpt_offer_consultation: {str(e)}", exc_info=True)
@@ -207,7 +205,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "Готовы ли вы продолжить? (Да/Нет)"
                 )
 
-                await send_whatsapp_response(from_number, fallback_msg)
+                await queue_whatsapp_message(from_number, fallback_msg)
                 await set_lead_state(from_number, "questionnaire")
                 logger.info(f"[{from_number}][{state}] - Отправлен fallback-вариант для {from_number}")
 
@@ -220,23 +218,23 @@ async def dialog_menedger(from_number: str, message_text: str):
              message_text = message_text.strip().lower()
 
              if message_text == "нет":
-                   await send_whatsapp_response(from_number,"Хорошо, если передумаете - мы всегда готовы помочь!")
+                   await queue_whatsapp_message(from_number,"Хорошо, если передумаете - мы всегда готовы помочь!")
                    logger.info(f"[{from_number}] - отказался от анкеты")
 
              elif message_text == "да":
-                   await send_whatsapp_response(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.")
+                   await queue_whatsapp_message(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.")
                    await set_lead_state(from_number, "awaiting_full_name")
-                   await send_whatsapp_response(from_number, "🔹 *Укажите ваше полное ФИО*\n"
+                   await queue_whatsapp_message(from_number, "🔹 *Укажите ваше полное ФИО*\n"
                                                                "Формат: Фамилия Имя Отчество\n"
                                                                "Пример: *Иванов Иван Иванович*")
              
              else:
-                   await send_whatsapp_response(from_number, "Пожалуйста, ответьте '*Да*' или '*Нет*'")
+                   await queue_whatsapp_message(from_number, "Пожалуйста, ответьте '*Да*' или '*Нет*'")
                    logger.warning(f"[{from_number}] Получен некорректный ответ в состоянии questionnaire: {message_text}")
 
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в состоянии questionnaire: {str(e)}", exc_info=True)
-              await send_whatsapp_response(from_number, "Извините, произошла техническая ошибка. Пожалуйста, попробуйте еще раз.")
+              await queue_whatsapp_message(from_number, "Извините, произошла техническая ошибка. Пожалуйста, попробуйте еще раз.")
 
 
 
@@ -246,7 +244,7 @@ async def dialog_menedger(from_number: str, message_text: str):
              cleaned_name = message_text.strip()
 
              if not is_valid_full_name(cleaned_name):
-                   await send_whatsapp_response(from_number,"⚠️ Неверный формат ФИО. Требуется:\n"
+                   await queue_whatsapp_message(from_number,"⚠️ Неверный формат ФИО. Требуется:\n"
                                                                "• Фамилия\n• Имя\n• Отчество (если есть)\n\n"
                                                                "Пример: *Иванов Иван Иванович*\n"
                                                                "Пожалуйста, введите заново:" )
@@ -255,10 +253,10 @@ async def dialog_menedger(from_number: str, message_text: str):
              encrypted_name = encrypt(cleaned_name)
              await update_full_name_by_phone(from_number, encrypted_name)
 
-             await send_whatsapp_response(from_number, "✅ ФИО сохранено!")
+             await queue_whatsapp_message(from_number, "✅ ФИО сохранено!")
              await set_lead_state(from_number, "awaiting_city")
               
-             await send_whatsapp_response(
+             await queue_whatsapp_message(
               from_number,
               "📍 *В каком городе вы проживаете?*\n"
               "Пример: *Нур-Султан* или *Алматы*"
@@ -267,7 +265,7 @@ async def dialog_menedger(from_number: str, message_text: str):
              
        except Exception as e:
         logger.error(f"FullName processing error for {from_number}: {str(e)}")
-        await send_whatsapp_response(
+        await queue_whatsapp_message(
             from_number,
             "🔴 Произошла техническая ошибка. Пожалуйста, "
             "попробуйте отправить ФИО еще раз."
@@ -296,7 +294,7 @@ async def dialog_menedger(from_number: str, message_text: str):
 
               await update_city_by_phone(from_number, city)
               await set_lead_state(from_number, "awaiting_iin")
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
                             "✅ Город сохранен\n"
                             "🔹 *Укажите ваш ИИН*\n"
@@ -306,7 +304,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.info(f"[{from_number}] Успешно сохранен город: {city}")
 
        except CityValidationError:
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "❗ *Некорректное название городa*\n"
               "Пожалуйста, укажите реальный город проживания\n"
@@ -316,7 +314,7 @@ async def dialog_menedger(from_number: str, message_text: str):
 
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_city: {str(e)}", exc_info=True)
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте отправить город еще раз"
@@ -357,7 +355,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               "Пример: *1, 3, 5* или *2, 7*"
               )
 
-              await send_whatsapp_response(from_number, credit_types_message)
+              await queue_whatsapp_message(from_number, credit_types_message)
               
               # Переход к следующему состоянию
               if not await set_lead_state(from_number, "awaiting_credit_types"):
@@ -366,7 +364,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               logger.info(f"[{from_number}] ИИН успешно сохранен (зашифрован)")
 
        except IINValidationError:
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "❗ Неверный формат ИИН\n\n"
               "Требования:\n"
@@ -378,7 +376,7 @@ async def dialog_menedger(from_number: str, message_text: str):
 
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_iin: {str(e)}", exc_info=True)
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте отправить ИИН еще раз"
@@ -394,14 +392,14 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await set_lead_state(from_number, "awaiting_debt_amount"):
                            raise Exception("Не удалось обновить состояние пользователя")
                            
-                     await send_whatsapp_response(from_number, 
+                     await queue_whatsapp_message(from_number, 
                      "✅ Данные сохранены\n"
                      "🔹 *Укажите общую сумму задолженности*\n"
                      "Можно указать примерную сумму в тенге\n"
                      "Если неизвестно - отправьте '-'"
                      )
               else:
-                     await send_whatsapp_response(from_number, 
+                     await queue_whatsapp_message(from_number, 
                      "❗ Пожалуйста, выберите из списка\n"
                      "Пример: *1, 3, 5*"
                      )
@@ -409,7 +407,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_credit_types: {str(e)}", exc_info=True)
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте позже"
@@ -418,7 +416,7 @@ async def dialog_menedger(from_number: str, message_text: str):
     elif state == "awaiting_debt_amount":
        try: 
               if message_text == "-":
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                      "🔹 *Укажите ваш ежемесячный платеж по кредитам*\n"
                      "Пример: *120000 тг*\n"
                      "Если неизвестно - отправьте '-'"
@@ -437,7 +435,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                                   raise Exception("Не удалось обновить totalDebt пользователя")
                                   
 
-                            if not await send_whatsapp_response(from_number, 
+                            if not await queue_whatsapp_message(from_number, 
                                    "✅ Сумма задолженности сохранена\n"
                                    "🔹 *Укажите ваш ежемесячный платеж*\n"
                                    "Пример: *120000 тг*\n"
@@ -447,7 +445,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                             if not await set_lead_state(from_number, "awaiting_monthly_payment"):
                                   raise Exception("Не удалось обновить состояние пользователя")
                      else:
-                            if not await send_whatsapp_response(from_number, 
+                            if not await queue_whatsapp_message(from_number, 
                                    "❗ Не удалось распознать сумму\n"
                                    "Пожалуйста, укажите число\n"
                                    "Пример: *1000000 тг*"
@@ -456,7 +454,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                                   
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_debt_amoun: {str(e)}", exc_info=True)
-              await send_whatsapp_response(
+              await queue_whatsapp_message(
               from_number,
               "⚠️ Произошла техническая ошибка\n"
               "Пожалуйста, попробуйте позже"
@@ -465,7 +463,7 @@ async def dialog_menedger(from_number: str, message_text: str):
     elif state == "awaiting_monthly_payment":
        try:         
               if message_text == "-":
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                      "🔹 *Есть ли у вас просрочки?*\n"
                      "Ответьте Да/Нет"
                      ):
@@ -480,7 +478,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                             if not await update_monthly_payment_by_phone(from_number, totalDebt):
                                   raise Exception("Не удалось обновить данные totalDebt")
                                   
-                            if not await send_whatsapp_response(from_number, 
+                            if not await queue_whatsapp_message(from_number, 
                                    "✅ Данные сохранены\n"
                                    "🔹 *Есть ли у вас просрочки?*\n"
                                    "Ответьте Да/Нет"
@@ -490,7 +488,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                             if not await set_lead_state(from_number, "waiting_has_overdue"):
                                    raise Exception("Не удалось обновить состояние на waiting_has_overdue")
                      else:
-                            if not await send_whatsapp_response(from_number, 
+                            if not await queue_whatsapp_message(from_number, 
                                    "❗ Не удалось распознать сумму\n"
                                    "Пожалуйста, укажите число\n"
                                    "Пример: *100000 тг*"
@@ -499,7 +497,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_monthly_payment: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                      from_number,
                      "⚠️ Произошла техническая ошибка\n"
                      "Пожалуйста, попробуйте позже"
@@ -514,7 +512,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               if msg in ["да", "есть", "да есть", "да, есть"]:
                      if not await update_has_overdue_by_phone(from_number, True):
                            raise Exception("Не удалось сохранить в БД 'has_overdue'")
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                      "🔹 *Укажите количество дней просрочки*"
                      ):
                            raise Exception("Не удалось отправить сообщение 'Укажите количество дней просрочки' ")
@@ -523,7 +521,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                            raise Exception("Не удалось обновить состояние на 'awaiting_overdue_days'")
                            
               elif msg in ["нет", "не было", "отсутствует"]:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                      "🔹 *Есть ли у вас официальный доход?*\n"
                      "Ответьте Да/Нет"
                      ):
@@ -531,14 +529,14 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await set_lead_state(from_number, "awaiting_has_official_income"):
                            raise Exception("Не удалось обновить состояние на 'awaiting_has_official_income'")
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                      "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                            raise Exception(f"[{from_number}]Не удалось отправить сообщеие '❗ Пожалуйста, ответьте Да или Нет'")
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в waiting_has_overdue: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                      from_number,
                      "⚠️ Произошла техническая ошибка\n"
                      "Пожалуйста, попробуйте позже"
@@ -550,7 +548,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        try:   
               if not await update_overdue_days_by_phone(from_number, message_text):
                     raise Exception ("Не удалось сохранить 'overdue_days'")
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "✅ Данные сохранены\n"
                      "🔹 *Есть ли у вас официальный доход?*\n"
                      "Ответьте Да/Нет"
@@ -563,7 +561,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_overdue_days: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                      from_number,
                      "⚠️ Произошла техническая ошибка\n"
                      "Пожалуйста, попробуйте позже"
@@ -578,7 +576,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_official_income_by_phone(from_number, True):
                             raise Exception("Не удалось сохранить в БД 'has_official_income' (True)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Имеется ли у вас ТОО или ИП?*\n"
                      "Ответьте Да/Нет"
               ):
@@ -591,7 +589,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_official_income_by_phone(from_number, False):
                             raise Exception("Не удалось сохранить в БД 'has_official_income' (False)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Имеется ли у вас ТОО или ИП?*\n"
                      "Ответьте Да/Нет"
               ):
@@ -601,7 +599,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'waiting_has_business'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                             raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
@@ -609,7 +607,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_has_official_income: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -625,7 +623,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_business_by_phone(from_number, True):
                             raise Exception("Не удалось сохранить в БД 'has_business' (True)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Имеется ли у вас имущество?*\n"
                      "Ответьте Да/Нет"
               ):
@@ -638,7 +636,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_business_by_phone(from_number, False):
                             raise Exception("Не удалось сохранить в БД 'has_business' (False)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Имеется ли у вас имущество?*\n"
                      "Ответьте Да/Нет"
               ):
@@ -648,7 +646,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'awaiting_has_property'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                             raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
@@ -656,7 +654,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в waiting_has_business: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -672,7 +670,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_property_by_phone(from_number, True):
                             raise Exception("Не удалось сохранить в БД 'has_property' (True)")
 
-              if not await send_whatsapp_response(from_number,
+              if not await queue_whatsapp_message(from_number,
                      "🔹 *Укажите ваше имущество:*\n\n"
                      "1. Дом\n2. Квартира\n3. Гараж\n4. Доля\n"
                      "5. Автомобиль\n6. Акции\n7. Другое\n8. Нет имущества\n\n"
@@ -688,7 +686,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_property_by_phone(from_number, False):
                             raise Exception("Не удалось сохранить в БД 'has_property' (False)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Есть ли у вас супруг(а)?*\n"
                      "Ответьте Да/Нет"
               ):
@@ -698,7 +696,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'awaiting_has_spouse'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                             raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
@@ -706,7 +704,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_has_property: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -722,7 +720,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_property_types_by_phone(from_number, selected):
                             raise Exception("Не удалось сохранить в БД 'property_types'")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "✅ Данные сохранены\n"
                      "🔹 *Есть ли у вас супруг(а)?*\n"
                      "Ответьте Да/Нет"
@@ -733,7 +731,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'awaiting_has_spouse'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, выберите из списка\n"
                             "Пример: *1, 3, 5*"
                      ):
@@ -741,7 +739,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_property_types: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -757,7 +755,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_spouse_by_phone(from_number, True):
                             raise Exception("Не удалось сохранить в БД 'has_spouse' (True)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
                      "Ответьте Да или Нет"
               ):
@@ -770,7 +768,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_spouse_by_phone(from_number, False):
                             raise Exception("Не удалось сохранить в БД 'has_spouse' (False)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Есть ли у вас несовершеннолетние дети?*\n"
                      "Ответьте Да или Нет"
               ):
@@ -780,7 +778,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'awaiting_has_children'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                             raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
@@ -788,7 +786,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_has_spouse: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -804,7 +802,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_children_by_phone(from_number, True):
                             raise Exception("Не удалось сохранить в БД 'has_children' (True)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Выберите ваш социальный статус:*\n\n"
                      "1. Лицо с инвалидностью\n2. Получатель АСП\n"
                      "3. Многодетная семья\n4. Иные пособия/льготы\n"
@@ -821,7 +819,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      if not await update_has_children_by_phone(from_number, False):
                             raise Exception("Не удалось сохранить в БД 'has_children' (False)")
 
-              if not await send_whatsapp_response(from_number, 
+              if not await queue_whatsapp_message(from_number, 
                      "🔹 *Выберите ваш социальный статус:*\n\n"
                      "1. Лицо с инвалидностью\n2. Получатель АСП\n"
                      "3. Многодетная семья\n4. Иные пособия/льготы\n"
@@ -835,7 +833,7 @@ async def dialog_menedger(from_number: str, message_text: str):
                      raise Exception("Не удалось обновить состояние на 'awaiting_social_status'")
 
               else:
-                     if not await send_whatsapp_response(from_number, 
+                     if not await queue_whatsapp_message(from_number, 
                             "❗ Пожалуйста, ответьте Да или Нет"
                      ):
                             raise Exception("Не удалось отправить сообщение 'Пожалуйста, ответьте Да или Нет'")
@@ -843,7 +841,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Ошибка в awaiting_has_children: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка\n"
                             "Пожалуйста, попробуйте позже"
@@ -856,7 +854,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        try:
               selected = parse_social_status_selection(message_text)
               if not selected:
-                     if not await send_whatsapp_response(
+                     if not await queue_whatsapp_message(
                             from_number,
                             "❗ Пожалуйста, выберите из списка\nПример: *1, 2, 3*"
                      ):
@@ -866,7 +864,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               if not await update_social_status_by_phone(from_number, selected):
                      raise Exception("Не удалось сохранить в БД 'social_status'")
 
-              if not await send_whatsapp_response(
+              if not await queue_whatsapp_message(
               from_number,
               "✅ Анкета успешно заполнена!\n"
               "Наш специалист свяжется с вами в ближайшее время.\n\n"
@@ -886,7 +884,7 @@ async def dialog_menedger(from_number: str, message_text: str):
               # Получаем полные данные клиента для Bitrix24
               client_data = await get_full_client_data(from_number)
               if not client_data:
-                     if not await send_whatsapp_response(from_number, "❌ Ошибка при обработке ваших данных"):
+                     if not await queue_whatsapp_message(from_number, "❌ Ошибка при обработке ваших данных"):
                             raise Exception("Не удалось отправить сообщение об ошибке обработки данных")
                      return
 
@@ -898,7 +896,7 @@ async def dialog_menedger(from_number: str, message_text: str):
        except Exception as e:
               logger.error(f"[{from_number}] Критическая ошибка в awaiting_social_status: {str(e)}", exc_info=True)
               try:
-                     await send_whatsapp_response(
+                     await queue_whatsapp_message(
                             from_number,
                             "⚠️ Произошла техническая ошибка. Пожалуйста, попробуйте позже."
                      )

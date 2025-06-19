@@ -24,7 +24,6 @@ services:
 
   web:
     build: .
-    container_name: whatsapp-bot
     restart: always
     env_file:
       - .env
@@ -34,46 +33,14 @@ services:
     ports:
       - "8000:8000"
 
-  worker1:
+  worker:
     build: .
-    container_name: whatsapp-worker-1
     restart: always
     env_file:
       - .env
     depends_on:
       - redis
     command: python3 -m app.workers.send_worker
-
-  worker2:
-    build: .
-    container_name: whatsapp-worker-2
-    restart: always
-    env_file:
-      - .env
-    depends_on:
-      - redis
-    command: python3 -m app.workers.send_worker
-
-  worker3:
-    build: .
-    container_name: whatsapp-worker-3
-    restart: always
-    env_file:
-      - .env
-    depends_on:
-      - redis
-    command: python3 -m app.workers.send_worker
-
-  worker4:
-    build: .
-    container_name: whatsapp-worker-4
-    restart: always
-    env_file:
-      - .env
-    depends_on:
-      - redis
-    command: python3 -m app.workers.send_worker
-
 
 volumes:
   pgdata:
