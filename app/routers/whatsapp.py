@@ -1,6 +1,6 @@
 # app/routers/whatsapp.py
 from fastapi import APIRouter, Request
-from app.services.menedger import dialog_menedger
+from app.core.menedger import dialog_menedger
 
 router = APIRouter()
 

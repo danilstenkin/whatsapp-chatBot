@@ -1,5 +1,5 @@
 from app.db.database import save_message
-from app.services.deepSeek import generate_reply
+from app.core.deepseek import generate_reply
 from app.db.redis_client import set_lead_state, save_lead_state, get_lead_state
 from app.validators.user_data import is_valid_full_name, is_valid_iin, extract_float_from_text
 from app.db.utils import (
