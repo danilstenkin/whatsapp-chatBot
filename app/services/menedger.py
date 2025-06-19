@@ -31,6 +31,7 @@ from app.workers.queue_senders import queue_whatsapp_message
 
 
 async def dialog_menedger(from_number: str, message_text: str):
+    
     state = await get_lead_state(from_number)
 
     if state is None:
@@ -43,10 +44,16 @@ async def dialog_menedger(from_number: str, message_text: str):
             "📌 Переговоры с банками и МФО\n\n"
             "Расскажите, пожалуйста, с какой проблемой вы столкнулись? Мы постараемся вам помочь 🤝"
         )
-        await save_lead_state(phone=from_number)
-        await queue_whatsapp_message(from_number, welcome_text)
-            
-
+        try:
+              await queue_whatsapp_message(from_number, welcome_text)
+              await save_lead_state(phone=from_number)
+        except Exception as e:
+              logger.error(f"[{from_number}] - Ошибка при отправке приветственного сообщения: {str(e)}", exc_info=True)
+              
+              try:
+                     await queue_whatsapp_message(from_number, "Whats-App временно не работает, попробуйте позже.")
+              except Exception as inner_e:
+                     logger.error(f"[{from_number}] - Ошибка при отправке сообщения об ошибке: {str(inner_e)}", exc_info=True)
 
             
     elif state == "gpt_problem_empathy":
