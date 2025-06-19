@@ -28,6 +28,7 @@ from app.validators.credit_types import parse_credit_selection, parse_social_sta
 from app.services.create_task_in_bitrix import send_lead_to_bitrix
 from datetime import datetime
 from app.logger_config import logger
+from app.workers.queue_senders import queue_whatsapp_message
 
 
 async def dialog_menedger(from_number: str, message_text: str):
@@ -44,7 +45,8 @@ async def dialog_menedger(from_number: str, message_text: str):
             "Расскажите, пожалуйста, с какой проблемой вы столкнулись? Мы постараемся вам помочь 🤝"
         )
         await save_lead_state(phone=from_number)
-        await send_whatsapp_response(from_number, welcome_text)
+        #await send_whatsapp_response(from_number, welcome_text)
+        await queue_whatsapp_message(from_number, welcome_text )
             
 
 

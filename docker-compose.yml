@@ -28,15 +28,21 @@ services:
     restart: always
     env_file:
       - .env
-    ports:
-      - "8000:8000"
     depends_on:
       - db
       - redis
-    volumes:
-      - .:/app
-    command: >
-      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: .
+    container_name: whatsapp-worker
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    command: python3 -m app.workers.send_worker
 
 volumes:
   pgdata:
