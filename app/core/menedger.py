@@ -28,9 +28,22 @@ from app.services.create_task_in_bitrix import send_lead_to_bitrix
 from datetime import datetime
 from app.logger_config import logger
 from app.workers.queue_senders import queue_whatsapp_message
+from app.db.redis_client import redis_client
+import json
 
+LOCK_TTL = 10
 
 async def dialog_menedger(from_number: str, message_text: str):
+    
+    failed_messages = await redis_client.lrange("failed_message_queue", 0, -1)
+    for msg_json in failed_messages:
+              try:
+                     msg = json.loads(msg_json)
+                     if msg.get("phone") == from_number:
+                            logger.warning(f"[{from_number}] - Обнаружено незавершенное сообщение в DLQ. Блокируем диалог.")
+                            return
+              except Exception as e:
+                     logger.error(f"[{from_number}] - Ошибка парсинга сообщения из DLQ: {str(e)}")
 
     state = await get_lead_state(from_number)
 
@@ -221,12 +234,10 @@ async def dialog_menedger(from_number: str, message_text: str):
                    logger.info(f"[{from_number}] - отказался от анкеты")
 
              elif message_text == "да":
-                   await queue_whatsapp_message(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.")
-                   await set_lead_state(from_number, "awaiting_full_name")
-                   await queue_whatsapp_message(from_number, "🔹 *Укажите ваше полное ФИО*\n"
+                   await queue_whatsapp_message(from_number, "Отлично! Давайте заполним анкету для записи на консультацию.\n\n🔹 *Укажите ваше полное ФИО*\n"
                                                                "Формат: Фамилия Имя Отчество\n"
                                                                "Пример: *Иванов Иван Иванович*")
-             
+                   await set_lead_state(from_number, "awaiting_full_name")
              else:
                    await queue_whatsapp_message(from_number, "Пожалуйста, ответьте '*Да*' или '*Нет*'")
                    logger.warning(f"[{from_number}] Получен некорректный ответ в состоянии questionnaire: {message_text}")
@@ -250,15 +261,9 @@ async def dialog_menedger(from_number: str, message_text: str):
              encrypted_name = encrypt(cleaned_name)
              await update_full_name_by_phone(from_number, encrypted_name)
 
-             await queue_whatsapp_message(from_number, "✅ ФИО сохранено!")
+             await queue_whatsapp_message(from_number, "✅ ФИО сохранено!\n\n📍 *В каком городе вы проживаете?*\nПример: *Нур-Султан* или *Алматы*")
              await set_lead_state(from_number, "awaiting_city")
-              
-             await queue_whatsapp_message(
-              from_number,
-              "📍 *В каком городе вы проживаете?*\n"
-              "Пример: *Нур-Султан* или *Алматы*"
-        )
-    
+       
        except Exception as e:
         logger.error(f"FullName processing error for {from_number}: {str(e)}")
         await queue_whatsapp_message(

@@ -2,7 +2,7 @@ import asyncio
 import json
 import redis.asyncio as aioredis
 import os
-from app.services.messenger import send_whatsapp_response
+from app.services.message_safe_sender import safe_send_message
 from app.logger_config import logger
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
@@ -24,7 +24,7 @@ async def process_message(redis_conn):
         text = message["text"]
         
         logger.info(f"[QUEUE] Обрабатываем сообщение для {phone}")
-        await send_whatsapp_response(phone, text)
+        await safe_send_message(phone, text)
         return True
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error: {e}")
